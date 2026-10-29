@@ -11,7 +11,8 @@ fi
 nft delete table inet sentinel 2>/dev/null   # unblock everything Sentinel blocked
 rm -f /etc/systemd/system/sentinel.service /etc/init.d/sentinel /usr/local/bin/sentinel \
       /usr/share/polkit-1/actions/io.github.micha7421.sentinel.policy \
-      /usr/share/applications/sentinel.desktop /etc/xdg/autostart/sentinel-tray.desktop
+      /usr/share/applications/sentinel.desktop /etc/xdg/autostart/sentinel-tray.desktop \
+      /usr/share/libalpm/hooks/sentinel-scan.hook
 rm -rf /opt/sentinel
 command -v systemctl >/dev/null && systemctl daemon-reload 2>/dev/null
 echo "Sentinel removed. Settings in /etc/sentinel and quarantine in"

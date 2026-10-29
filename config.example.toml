@@ -70,3 +70,11 @@ persistence_guard = true
 # starts many processes and could look like one. Raise the limit if you turn it on.
 crash_guard = false
 crash_max_children = 200
+
+# ---------- Supply-chain guard (Arch/pacman) ----------
+
+# Scan packages for risky install scripts / SUID / sensitive files before
+# pacman installs them (needs the pacman hook; installed automatically on Arch)
+package_scan = true
+# Refuse to install a package with a HIGH-risk finding (otherwise only warn)
+package_scan_block = false

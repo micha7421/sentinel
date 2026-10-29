@@ -39,6 +39,14 @@ systemd or OpenRC.
   on Arch/Tessera — to spot secretly changed system files, and tells you the
   exact command (`emerge -1 …` or `pacman -S …`) to repair them.
 
+**Supply-chain guard (Arch/pacman)**
+- A pacman hook scans every package *before* it installs, looking inside its
+  install script and files for danger signs: downloading and running code,
+  editing sudoers or `ld.so.preload`, adding SUID bits, opening reverse shells,
+  dropping into cron/PAM/autostart. It only warns by default; set
+  `package_scan_block` to have a high-risk package stop the install. It always
+  fails open — a scanner hiccup never blocks your updates.
+
 > Sentinel is an extra layer, not a replacement for **backups** or an
 > antivirus. It does not catch every kind of malware (for example a program
 > that only reads a few files). Keep backups.

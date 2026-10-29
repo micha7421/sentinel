@@ -10,7 +10,8 @@
   python -m sentinel test-breakin        safe test of the break-in guard
   python -m sentinel unblock IP          unblock an IP address
   python -m sentinel lookup IP           who is behind an IP? (VPN, Tor, ...)
-  python -m sentinel check-system        Gentoo: check system programs
+  python -m sentinel check-system        check system programs vs package manager
+  python -m sentinel scan-package FILE   scan a package for supply-chain risks
   python -m sentinel test-threats        safe test of credential/persistence/crash guards
   python -m sentinel gui                 open the Sentinel window
 """
@@ -204,7 +205,67 @@ def cmd_check_system(args):
     for b in r["missing"]:
         print(f"  MISSING  {b['path']}  ({b['package']})")
     if not r["changed"] and not r["missing"]:
-        print("✅ Everything matches what Portage installed.")
+        print(f"✅ Everything matches what {packages.name()} installed.")
+
+
+LEVEL_MARK = {"HIGH": "🔴", "MEDIUM": "🟡", "INFO": "🔵"}
+
+
+def cmd_scan_package(args):
+    """Wrapper that FAILS OPEN: a bug in the scanner must never block pacman.
+    Only a deliberate 'blocked' decision exits non-zero."""
+    try:
+        _scan_package(args)
+    except SystemExit:
+        raise  # deliberate block/allow decision
+    except Exception as e:
+        logging.getLogger("sentinel").error("Package scan error (ignored): %s", e)
+        print(f"Sentinel: package scan skipped ({e}).")
+        sys.exit(0)
+
+
+def _scan_package(args):
+    """Scan package files for supply-chain risks. With no files, read pacman
+    target names from stdin (this is how the pacman hook calls us)."""
+    from . import pkgscan
+    cfg = config.load_raw()
+    if args.files:
+        pkgs = [Path(f) for f in args.files]
+    elif not sys.stdin.isatty():
+        pkgs = pkgscan.resolve_from_cache(sys.stdin.read().splitlines())
+    else:
+        sys.exit("Give package files to scan, or pipe pacman target names in.")
+
+    worst = None
+    order = {"HIGH": 0, "MEDIUM": 1, "INFO": 2}
+    for pkg in pkgs:
+        try:
+            name, findings = pkgscan.scan_file(pkg)
+        except OSError as e:
+            print(f"Sentinel: could not scan {pkg}: {e}")
+            continue
+        if not findings:
+            continue
+        findings.sort(key=lambda f: order[f[0]])
+        print(f"\nSentinel — risky things in package '{name}':")
+        for level, msg in findings:
+            print(f"  {LEVEL_MARK[level]} {level}: {msg}")
+        top = findings[0][0]
+        if worst is None or order[top] < order[worst]:
+            worst = top
+
+    if worst == "HIGH":
+        popup("⚠️ Risky package being installed",
+              "A package pacman is installing does something dangerous "
+              "(see the terminal). Only continue if you trust it.", "critical")
+        if cfg["package_scan_block"]:
+            print("\nSentinel BLOCKED this install (package_scan_block is on). "
+                  "Install by hand if you are sure it is safe.")
+            sys.exit(1)
+    if worst:
+        print("\nSentinel: this is a warning, not proof of malware. Check the "
+              "package if anything looks wrong.")
+    sys.exit(0)
 
 
 def cmd_unblock(args):
@@ -430,6 +491,9 @@ def main():
     lk.set_defaults(func=cmd_lookup)
     sub.add_parser("check-system", help="Gentoo: check system programs").set_defaults(func=cmd_check_system)
     sub.add_parser("test-threats", help="safe test of the credential/persistence/crash guards").set_defaults(func=cmd_test_threats)
+    sp = sub.add_parser("scan-package", help="scan package files for supply-chain risks")
+    sp.add_argument("files", nargs="*", help="package files (.pkg.tar.*); none = read names from stdin")
+    sp.set_defaults(func=cmd_scan_package)
     g = sub.add_parser("gui", help="open the Sentinel window")
     g.add_argument("--tray", action="store_true", help="start hidden in the tray")
     g.set_defaults(func=cmd_gui)

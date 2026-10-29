@@ -56,6 +56,13 @@ fi
 # Password rule for the window, menu entry, tray icon at login
 mkdir -p /usr/share/polkit-1/actions
 template io.github.micha7421.sentinel.policy > /usr/share/polkit-1/actions/io.github.micha7421.sentinel.policy
+
+# pacman supply-chain hook (Arch-based systems only)
+if [ -d /usr/share/libalpm/hooks ]; then
+    sed "s|/usr/bin/sentinel|$BINDIR/sentinel|" packaging/arch/sentinel-scan.hook \
+        > /usr/share/libalpm/hooks/sentinel-scan.hook
+    echo "Installed pacman supply-chain scan hook."
+fi
 if [ "$gui" = yes ]; then
     mkdir -p /usr/share/applications /etc/xdg/autostart
     template sentinel.desktop > /usr/share/applications/sentinel.desktop

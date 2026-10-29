@@ -79,7 +79,11 @@ DEFAULTS = {
     "crash_guard": False,
     "crash_max_children": 200,
 
-    # Gentoo: check system programs against Portage's records once a day.
+    # Supply-chain guard: scan packages before pacman installs them.
+    "package_scan": True,
+    "package_scan_block": False,   # True = refuse an install with a HIGH finding
+
+    # Check system programs against the package manager's records once a day.
     "system_check": True,
 }
 

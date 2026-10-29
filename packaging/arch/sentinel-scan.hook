@@ -1,0 +1,16 @@
+# Installed to /usr/share/libalpm/hooks/ — pacman runs this before every
+# install/upgrade so Sentinel can scan the incoming packages. It only warns by
+# default; set package_scan_block in /etc/sentinel/config.toml to have a
+# high-risk package actually stop the transaction.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Scanning packages for supply-chain risks (Sentinel)...
+When = PreTransaction
+Exec = /usr/bin/sentinel scan-package
+NeedsTargets
+AbortOnFail

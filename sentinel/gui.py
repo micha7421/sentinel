@@ -688,6 +688,13 @@ class SettingsPage(QWidget):
         self.system_check = QCheckBox("Check system programs against the package "
                                       "manager's records once a day")
         v.addWidget(self.system_check)
+        self.package_scan = QCheckBox("Scan packages for supply-chain risks before "
+                                      "they install (pacman)")
+        self.package_scan_block = QCheckBox("Refuse to install a package flagged "
+                                            "high-risk (otherwise only warn)")
+        if packages.name() == "pacman":
+            v.addWidget(self.package_scan)
+            v.addWidget(self.package_scan_block)
         group.setVisible(packages.available())
         layout.addWidget(group)
 
@@ -771,6 +778,8 @@ class SettingsPage(QWidget):
         self.persistence_guard.setChecked(cfg["persistence_guard"])
         self.crash_guard.setChecked(cfg["crash_guard"])
         self.system_check.setChecked(cfg["system_check"])
+        self.package_scan.setChecked(cfg["package_scan"])
+        self.package_scan_block.setChecked(cfg["package_scan_block"])
         self.loaded = True
 
     def save(self):
@@ -798,6 +807,8 @@ class SettingsPage(QWidget):
             "persistence_guard": self.persistence_guard.isChecked(),
             "crash_guard": self.crash_guard.isChecked(),
             "system_check": self.system_check.isChecked(),
+            "package_scan": self.package_scan.isChecked(),
+            "package_scan_block": self.package_scan_block.isChecked(),
         })
         fd, path = tempfile.mkstemp(prefix="sentinel-", suffix=".toml")
         with os.fdopen(fd, "w") as f:
