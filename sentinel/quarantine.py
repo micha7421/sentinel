@@ -6,7 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
-from . import portage_db
+from . import packages
 from .config import QUARANTINE_DIR
 
 # Never quarantine files from these places: they belong to the system
@@ -29,7 +29,7 @@ def files_to_quarantine(exe, cmdline):
     for arg in cmdline[1:]:
         if os.path.isfile(arg) and not is_system_file(os.path.abspath(arg)):
             found.append(os.path.abspath(arg))
-    found = [f for f in dict.fromkeys(found) if not portage_db.owner(f)]
+    found = [f for f in dict.fromkeys(found) if not packages.owner(f)]
     return found
 
 

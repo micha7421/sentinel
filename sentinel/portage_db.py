@@ -133,3 +133,7 @@ def check_system(prefixes=CHECK_PREFIXES, slow=False):
                 time.sleep(0.2)
     return {"time": time.time(), "seconds": round(time.time() - started, 1),
             "checked": checked, "changed": changed, "missing": missing}
+
+
+def repair_command(packages):
+    return "emerge -1 " + " ".join("=" + p for p in packages)

@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QStackedWidget,
     QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import breakin, config, portage_db, quarantine
+from . import breakin, config, packages, quarantine
 
 STATUS_TEXT = {"blocked": "Blocked in the firewall.", "expired": "The block has expired.",
                "unblocked": "Unblocked.", "not blocked": "Not blocked."}
@@ -219,19 +219,19 @@ class OverviewPage(QWidget):
         QVBoxLayout(group).addWidget(self.features)
         layout.addWidget(group)
 
-        # Gentoo: compare system programs with Portage's records
-        self.syscheck = QGroupBox("Gentoo system check")
+        # Compare system programs with the package manager's records
+        self.syscheck = QGroupBox("System file check")
         row = QHBoxLayout(self.syscheck)
         self.syscheck_text = QLabel()
         self.syscheck_text.setWordWrap(True)
         self.syscheck_text.setTextFormat(Qt.TextFormat.RichText)
         row.addWidget(self.syscheck_text, 1)
         self.syscheck_btn = QPushButton(theme_icon("system-search"), "Check now")
-        self.syscheck_btn.setToolTip("Compares your system programs with what Portage "
-                                     "installed, to find secretly changed ones.")
+        self.syscheck_btn.setToolTip("Compares your system programs with what the "
+                                     "package manager installed, to find changed ones.")
         self.syscheck_btn.clicked.connect(self.check_system)
         row.addWidget(self.syscheck_btn, 0, Qt.AlignmentFlag.AlignTop)
-        self.syscheck.setVisible(portage_db.available())
+        self.syscheck.setVisible(packages.available())
         layout.addWidget(self.syscheck)
 
         # Tests
@@ -327,7 +327,7 @@ class OverviewPage(QWidget):
         self.refresh_syscheck()
 
     def refresh_syscheck(self):
-        if not portage_db.available():
+        if not packages.available():
             return
         try:
             r = json.loads(config.INTEGRITY_FILE.read_text())
@@ -340,14 +340,14 @@ class OverviewPage(QWidget):
         if not bad:
             self.syscheck_text.setText(
                 f"✅ Last check {when}: all {r['checked']} system programs match "
-                "what Portage installed.")
+                f"what {packages.name()} installed.")
         else:
             pkgs = sorted({b["package"] for b in bad})
             files = "<br>".join(f"&nbsp;&nbsp;{b['path']} ({b['package']})" for b in bad[:6])
             self.syscheck_text.setText(
                 f"<b style='color:#da4453'>⚠️ Last check {when}: {len(r['changed'])} changed, "
                 f"{len(r['missing'])} missing</b><br>{files}<br>"
-                f"Reinstall them with: <code>emerge -1 {' '.join('=' + p for p in pkgs[:6])}</code>")
+                f"Reinstall them with: <code>{packages.repair_command(pkgs[:6])}</code>")
 
     def check_system(self):
         self.syscheck_btn.setEnabled(False)
@@ -683,11 +683,12 @@ class SettingsPage(QWidget):
             v.addWidget(box)
         layout.addWidget(group)
 
-        group = QGroupBox("Gentoo")
+        group = QGroupBox("System integrity")
         v = QVBoxLayout(group)
-        self.system_check = QCheckBox("Check system programs against Portage's records once a day")
+        self.system_check = QCheckBox("Check system programs against the package "
+                                      "manager's records once a day")
         v.addWidget(self.system_check)
-        group.setVisible(portage_db.available())
+        group.setVisible(packages.available())
         layout.addWidget(group)
 
         row = QHBoxLayout()

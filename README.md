@@ -1,7 +1,8 @@
 # 🛡️ Sentinel
 
-A background security guard for Linux, built for Gentoo (works on KDE with
-systemd or OpenRC).
+A background security guard for Linux. First-class on **Gentoo** (Portage) and
+**Arch-based** distros like **Tessera Linux** (pacman); works on KDE with
+systemd or OpenRC.
 
 ## What it does (version 0.4)
 
@@ -32,10 +33,11 @@ systemd or OpenRC).
   and freezes the runaway processes. Off by default, because compiling on
   Gentoo also starts many processes.
 
-**Gentoo system check**
+**System file check**
 - Once a day, compares your installed programs (`/usr/bin`, PAM modules, ...)
-  with the checksums Portage recorded, to spot secretly changed system files,
-  and tells you the `emerge -1` command to repair them.
+  with the checksums your package manager recorded — Portage on Gentoo, pacman
+  on Arch/Tessera — to spot secretly changed system files, and tells you the
+  exact command (`emerge -1 …` or `pacman -S …`) to repair them.
 
 > Sentinel is an extra layer, not a replacement for **backups** or an
 > antivirus. It does not catch every kind of malware (for example a program
@@ -53,6 +55,20 @@ sudo emerge --ask app-antivirus/sentinel
 
 The `gui` USE flag (on by default) installs the window and tray icon. Turn it
 off for a server: `echo 'app-antivirus/sentinel -gui' | sudo tee /etc/portage/package.use/sentinel`.
+
+## Install on Arch / Tessera Linux (with pacman)
+
+A `PKGBUILD` is in `packaging/arch/`:
+
+```bash
+git clone https://github.com/micha7421/sentinel.git
+cd sentinel/packaging/arch
+makepkg -si
+```
+
+This pulls `python-psutil`, `python-watchdog`, `nftables`, `libnotify` and
+`polkit` (plus `python-pyqt6` for the window), installs the systemd service and
+the menu/tray entries, and places the config at `/etc/sentinel/config.toml`.
 
 Then start it and run it at every boot:
 

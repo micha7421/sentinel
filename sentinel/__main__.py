@@ -29,7 +29,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import (breakin, config, firewall, ipintel, notify, portage_db,
+from . import (breakin, config, firewall, ipintel, notify, packages,
                quarantine)
 from .credential import CredentialGuard
 from .crash import CrashGuard
@@ -68,7 +68,7 @@ def cmd_run(args):
         guards.append(CrashGuard(cfg))
     for g in guards:
         g.start()
-    if cfg["system_check"] and portage_db.available():
+    if cfg["system_check"] and packages.available():
         threading.Thread(target=daily_system_check, args=(stop,), daemon=True).start()
 
     popup("Sentinel is running", "Your PC is being protected.", "low")
@@ -80,16 +80,16 @@ def cmd_run(args):
 
 def system_check(slow=False):
     """Check system programs against Portage's records, save and report."""
-    result = portage_db.check_system(slow=slow)
+    result = packages.check_system(slow=slow)
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     config.INTEGRITY_FILE.write_text(json.dumps(result, indent=1))
     bad = result["changed"] + result["missing"]
     if bad:
-        packages = sorted({b["package"] for b in bad})
+        pkgs = sorted({b["package"] for b in bad})
         popup("⚠️ System programs were changed!",
               f"{len(result['changed'])} changed, {len(result['missing'])} missing, "
-              f"from: {', '.join(packages[:5])}\n"
-              f"Fix with: emerge -1 {' '.join('=' + p for p in packages[:5])}",
+              f"from: {', '.join(pkgs[:5])}\n"
+              f"Fix with: {packages.repair_command(pkgs[:5])}",
               "critical")
     return result
 
@@ -194,9 +194,9 @@ def cmd_apply_config(args):
 
 
 def cmd_check_system(args):
-    if not portage_db.available():
-        sys.exit("This only works on Gentoo (no /var/db/pkg).")
-    print("Checking system programs against Portage's records...")
+    if not packages.available():
+        sys.exit("No supported package manager found (Portage or pacman).")
+    print(f"Checking system programs against {packages.name()}'s records...")
     r = system_check()
     print(f"Checked {r['checked']} files in {r['seconds']} s.")
     for b in r["changed"]:

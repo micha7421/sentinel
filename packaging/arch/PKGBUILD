@@ -1,0 +1,43 @@
+# Maintainer: micha7421
+# Sentinel: a background security guard (ransomware, break-in, spyware).
+# Packaged for Arch-based distros such as Tessera Linux.
+pkgname=sentinel
+pkgver=0.4.0
+pkgrel=1
+pkgdesc="Background security guard: ransomware, break-in and spyware protection"
+arch=('any')
+url="https://github.com/micha7421/sentinel"
+license=('GPL3')
+depends=('python' 'python-psutil' 'python-watchdog' 'nftables' 'libnotify' 'polkit')
+optdepends=('python-pyqt6: the Sentinel window and tray icon')
+makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+backup=('etc/sentinel/config.toml')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/micha7421/sentinel/archive/refs/tags/v$pkgver.tar.gz")
+install=sentinel.install
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+
+    # Fill in where the program lives in the service/desktop files.
+    template() { sed "s|@BINDIR@|/usr/bin|g" "data/$1.in"; }
+
+    template sentinel.service | install -Dm644 /dev/stdin \
+        "$pkgdir/usr/lib/systemd/system/sentinel.service"
+    template io.github.micha7421.sentinel.policy | install -Dm644 /dev/stdin \
+        "$pkgdir/usr/share/polkit-1/actions/io.github.micha7421.sentinel.policy"
+    template sentinel.desktop | install -Dm644 /dev/stdin \
+        "$pkgdir/usr/share/applications/sentinel.desktop"
+    template sentinel-tray.desktop | install -Dm644 /dev/stdin \
+        "$pkgdir/etc/xdg/autostart/sentinel-tray.desktop"
+
+    install -Dm644 config.example.toml "$pkgdir/etc/sentinel/config.toml"
+    install -dm755 "$pkgdir/var/lib/sentinel" "$pkgdir/var/log/sentinel"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

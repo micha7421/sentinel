@@ -77,9 +77,9 @@ def _trusted_location(exe):
     """True if this executable looks like a genuine installed program and not
     something dropped in /tmp or a home folder. On Gentoo we ask Portage; on
     other systems we fall back to the standard system directories."""
-    from . import portage_db
-    if portage_db.available():
-        return portage_db.owner(exe) is not None
+    from . import packages
+    if packages.available():
+        return packages.owner(exe) is not None
     return exe.startswith(SYSTEM_DIRS)
 
 BAIT_PRIVATE_KEY = """-----BEGIN OPENSSH PRIVATE KEY-----

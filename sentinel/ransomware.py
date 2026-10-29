@@ -26,7 +26,7 @@ import psutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import config, portage_db, quarantine
+from . import config, packages, quarantine
 from .notify import popup
 from .tracker import WriteTracker
 
@@ -295,7 +295,7 @@ class RansomwareGuard(FileSystemEventHandler):
 
         # Ransomware sometimes uses normal tools (like gpg) to do its work,
         # or replaces a system program. Gentoo's package database tells us.
-        genuine = portage_db.is_genuine(exe) if exe else None
+        genuine = packages.is_genuine(exe) if exe else None
         if genuine and genuine[1]:
             line += (f"\n'{name}' is a normal program from {genuine[0]}. If you "
                      "were using it yourself, add it to the trusted programs.")

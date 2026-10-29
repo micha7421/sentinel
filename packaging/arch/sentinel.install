@@ -1,0 +1,10 @@
+post_install() {
+    echo "Start Sentinel and run it at every boot:"
+    echo "    systemctl enable --now sentinel"
+    echo "Settings: /etc/sentinel/config.toml  (set 'user' if the PC has several accounts)"
+    echo "Safe tests (as root):  sentinel test-ransomware  /  test-breakin  /  test-threats"
+    echo "Window: search for \"Sentinel\" in the menu."
+}
+post_upgrade() {
+    echo "Restart Sentinel to use the new version:  systemctl restart sentinel"
+}
