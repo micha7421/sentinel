@@ -1,0 +1,13 @@
+[Unit]
+Description=Sentinel security guard (ransomware protection)
+After=local-fs.target
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/opt/sentinel
+ExecStart=/usr/bin/python3 -m sentinel run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

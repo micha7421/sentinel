@@ -1,0 +1,23 @@
+# Sentinel settings. After changing: sudo systemctl restart sentinel
+
+# Your username (gets the popups, ~ means this user's home folder)
+user = ""
+
+# Folders to protect from ransomware
+watch_dirs = ["~/Documents", "~/Pictures", "~/Desktop", "~/Downloads", "~/Music", "~/Videos"]
+
+# Put trap files ("!sentinel-trap-do-not-touch.docx") into those folders
+canaries = true
+
+# Alarm when this many files change within this many seconds (and look encrypted)
+burst_files = 30
+window_seconds = 10
+
+# What to do with the ransomware: kill it, and move it to quarantine
+auto_kill = true
+auto_quarantine = true
+
+# Programs that are never killed
+allowlist = ["dolphin", "plasmashell", "baloo_file", "kio_file", "kioworker",
+             "rsync", "borg", "restic", "git", "tar", "ark", "kdeconnectd",
+             "syncthing", "nextcloud"]
