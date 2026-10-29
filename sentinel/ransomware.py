@@ -13,6 +13,7 @@ and shows a popup.
 
 import collections
 import hashlib
+import json
 import logging
 import math
 import os
@@ -25,7 +26,7 @@ import psutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import quarantine
+from . import config, quarantine
 from .notify import popup
 from .tracker import WriteTracker
 
@@ -66,8 +67,9 @@ def is_inside(path, folders):
 
 
 class RansomwareGuard(FileSystemEventHandler):
-    def __init__(self, cfg, watch_dirs=None):
+    def __init__(self, cfg, watch_dirs=None, test=False):
         self.cfg = cfg
+        self.test = test
         self.dirs = [d for d in (watch_dirs or cfg["watch_dirs"]) if d.is_dir()]
         self.events = collections.deque()  # (time, path, kind)
         self.canaries = {}  # path -> sha256 of the content
@@ -193,16 +195,29 @@ class RansomwareGuard(FileSystemEventHandler):
                   f"{reason}\nCould not find which program did it. "
                   "If you didn't do this yourself, turn off your PC's network.",
                   "critical")
+            self.record(reason, ["Could not find which program did it."])
             return
 
         report = []
         for proc in suspects:
             report.append(self.handle_suspect(proc, reason))
 
+        self.record(reason, report)
         popup("🛑 Ransomware stopped!", reason + "\n\n" + "\n".join(report),
               "critical")
         self.events.clear()
         self.place_canaries()  # replace damaged traps
+
+    def record(self, reason, actions):
+        """Save the alarm in the history file the window shows."""
+        entry = {"time": time.time(), "reason": reason, "actions": actions,
+                 "test": self.test}
+        try:
+            config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with open(config.EVENTS_FILE, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError as e:
+            log.error("Could not save alarm history: %s", e)
 
     def find_suspects(self):
         found = self.suspects_from_tracker() if self.tracker else self.guess_suspects()

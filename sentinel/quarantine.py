@@ -52,7 +52,15 @@ def list_items():
     return items
 
 
+def _check_id(item_id):
+    """Only allow plain names of real quarantine items (no ../ tricks)."""
+    if "/" in item_id or item_id.startswith(".") or \
+            not (QUARANTINE_DIR / (item_id + ".json")).is_file():
+        raise ValueError(f"No quarantine item called {item_id!r}")
+
+
 def restore(item_id):
+    _check_id(item_id)
     meta_file = QUARANTINE_DIR / (item_id + ".json")
     meta = json.loads(meta_file.read_text())
     original = Path(meta["original"])
@@ -66,5 +74,6 @@ def restore(item_id):
 
 
 def delete(item_id):
+    _check_id(item_id)
     (QUARANTINE_DIR / item_id).unlink(missing_ok=True)
     (QUARANTINE_DIR / (item_id + ".json")).unlink(missing_ok=True)

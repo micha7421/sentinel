@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sentinel (tray)
+Comment=Shows the Sentinel shield in the system tray
+Exec=/usr/local/bin/sentinel gui --tray
+Icon=security-high
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

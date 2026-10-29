@@ -16,15 +16,29 @@ A background security guard for Linux (made on Gentoo + KDE + systemd).
 
 ```bash
 sudo emerge --ask dev-python/watchdog dev-python/psutil x11-libs/libnotify
-git clone https://github.com/YOUR-NAME/sentinel.git
+git clone https://github.com/micha7421/sentinel.git
 cd sentinel
 sudo ./install.sh
 ```
 
-## Use it
+## The window
+
+Search for **Sentinel** in the KDE menu, or click the shield in the system
+tray (it starts automatically when you log in).
+
+- 🟢 green shield: you are protected
+- 🔴 red shield: a new alarm, open the window to see what happened
+- 🟠 orange shield: protection is off
+
+Pages: **Overview** (status and tests), **Quarantine** (restore or delete caught
+programs), **Activity** (alarm history and log), **Settings** (folders, options,
+trusted programs). KDE asks for your password when you change something.
+
+## Commands
 
 | Command | What it does |
 |---|---|
+| `sentinel gui` | Opens the window |
 | `sudo sentinel test-popup` | Shows a test popup |
 | `sudo sentinel test-ransomware` | Safe test: releases fake ransomware in a throwaway folder |
 | `sudo sentinel quarantine` | Lists programs that were quarantined |
@@ -47,7 +61,13 @@ Settings: `/etc/sentinel/config.toml` (then `sudo systemctl restart sentinel`).
       shows where the IP comes from and whether it's a VPN or Tor
 - [ ] Security center menu: finds installed tools (Mullvad VPN, firewall,
       ClamAV, ...) and controls them from one place
-- [ ] Nicer interface (tray icon / window)
+- [x] Window and tray icon
+
+## Update
+
+```bash
+cd sentinel && git pull && sudo ./install.sh
+```
 
 ## Uninstall
 

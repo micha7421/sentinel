@@ -3,7 +3,9 @@
 set -e
 [ "$(id -u)" -eq 0 ] || { echo "Please run with sudo"; exit 1; }
 systemctl disable --now sentinel 2>/dev/null || true
-rm -f /etc/systemd/system/sentinel.service /usr/local/bin/sentinel
+rm -f /etc/systemd/system/sentinel.service /usr/local/bin/sentinel \
+      /usr/share/polkit-1/actions/io.github.micha7421.sentinel.policy \
+      /usr/share/applications/sentinel.desktop /etc/xdg/autostart/sentinel-tray.desktop
 rm -rf /opt/sentinel
 systemctl daemon-reload
 echo "Sentinel removed. Settings in /etc/sentinel and quarantine in"

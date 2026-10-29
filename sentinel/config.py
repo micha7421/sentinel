@@ -1,7 +1,7 @@
 """Settings.
 
-As a system service (root): /etc/sentinel/config.toml
-As a normal user:           ~/.config/sentinel/config.toml
+Installed as a system service: /etc/sentinel/config.toml
+Not installed (developing):     ~/.config/sentinel/config.toml
 """
 
 import os
@@ -10,9 +10,11 @@ import tomllib
 from pathlib import Path
 
 IS_ROOT = os.geteuid() == 0
+SYSTEM_CONFIG_FILE = Path("/etc/sentinel/config.toml")
+INSTALLED = SYSTEM_CONFIG_FILE.exists()
 
-if IS_ROOT:
-    CONFIG_FILE = Path("/etc/sentinel/config.toml")
+if IS_ROOT or INSTALLED:
+    CONFIG_FILE = SYSTEM_CONFIG_FILE
     DATA_DIR = Path("/var/lib/sentinel")
     LOG_FILE = Path("/var/log/sentinel/sentinel.log")
 else:
@@ -20,6 +22,7 @@ else:
     DATA_DIR = Path.home() / ".local/share/sentinel"
     LOG_FILE = Path.home() / ".local/state/sentinel/sentinel.log"
 QUARANTINE_DIR = DATA_DIR / "quarantine"
+EVENTS_FILE = DATA_DIR / "events.jsonl"  # history of alarms, one JSON per line
 
 DEFAULTS = {
     # The desktop user who gets the popups and whose files are protected.
@@ -44,17 +47,53 @@ DEFAULTS = {
 }
 
 
-def load():
+def load_raw(path=None):
+    """Settings exactly as written in the file (missing ones from DEFAULTS)."""
     cfg = dict(DEFAULTS)
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE, "rb") as f:
+    path = path or CONFIG_FILE
+    if path.exists():
+        with open(path, "rb") as f:
             cfg.update(tomllib.load(f))
+    return cfg
 
+
+def validate(cfg):
+    """Raise ValueError if a setting has the wrong type."""
+    for key, value in cfg.items():
+        if key not in DEFAULTS:
+            raise ValueError(f"Unknown setting: {key}")
+        want = type(DEFAULTS[key])
+        if not isinstance(value, want) or (want is int and isinstance(value, bool)):
+            raise ValueError(f"{key} must be {want.__name__}")
+        if want is list and not all(isinstance(v, str) for v in value):
+            raise ValueError(f"{key} must be a list of text")
+        if want is int and value < 1:
+            raise ValueError(f"{key} must be at least 1")
+
+
+def to_toml(cfg):
+    """Write settings as TOML (only handles the simple types we use)."""
+    def fmt(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, int):
+            return str(v)
+        if isinstance(v, str):
+            return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        return "[" + ", ".join(fmt(x) for x in v) + "]"
+    lines = ["# Sentinel settings. After changing: sudo systemctl restart sentinel", ""]
+    lines += [f"{key} = {fmt(cfg[key])}" for key in DEFAULTS if key in cfg]
+    return "\n".join(lines) + "\n"
+
+
+def load():
+    cfg = load_raw()
     name = cfg["user"] or os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
     user = pwd.getpwnam(name)
     cfg["user"], cfg["uid"], cfg["home"] = user.pw_name, user.pw_uid, user.pw_dir
-
-    def expand(d):
-        return Path(user.pw_dir + d[1:] if d.startswith("~") else d)
-    cfg["watch_dirs"] = [expand(d) for d in cfg["watch_dirs"]]
+    cfg["watch_dirs"] = [expand(d, user.pw_dir) for d in cfg["watch_dirs"]]
     return cfg
+
+
+def expand(folder, home):
+    return Path(home + folder[1:] if folder.startswith("~") else folder)

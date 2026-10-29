@@ -6,10 +6,13 @@
   python -m sentinel quarantine          list quarantined programs
   python -m sentinel restore ID          put a quarantined program back
   python -m sentinel delete ID           delete a quarantined program for good
+  python -m sentinel apply-config FILE   check and use new settings (root)
+  python -m sentinel gui                 open the Sentinel window
 """
 
 import argparse
 import logging
+import pwd
 import shutil
 import signal
 import subprocess
@@ -23,12 +26,16 @@ from .ransomware import RansomwareGuard
 
 
 def setup_logging():
-    config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    handlers = [logging.StreamHandler()]
+    try:
+        config.LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(config.LOG_FILE))
+    except OSError:
+        pass  # e.g. the window, running as a normal user
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.FileHandler(config.LOG_FILE),
-                  logging.StreamHandler()])
+        handlers=handlers)
 
 
 def cmd_run(args):
@@ -64,7 +71,7 @@ def cmd_test_ransomware(args):
 
     cfg = config.load()
     cfg["canaries"] = not args.no_traps
-    guard = RansomwareGuard(cfg, watch_dirs=[folder])
+    guard = RansomwareGuard(cfg, watch_dirs=[folder], test=True)
     guard.start()
 
     print("Releasing fake ransomware in", folder)
@@ -102,12 +109,39 @@ def cmd_quarantine(args):
 
 
 def cmd_restore(args):
-    print("Restored to", quarantine.restore(args.id))
+    try:
+        print("Restored to", quarantine.restore(args.id))
+    except (ValueError, OSError) as e:
+        sys.exit(f"Could not restore: {e}")
 
 
 def cmd_delete(args):
-    quarantine.delete(args.id)
+    try:
+        quarantine.delete(args.id)
+    except (ValueError, OSError) as e:
+        sys.exit(f"Could not delete: {e}")
     print("Deleted.")
+
+
+def cmd_apply_config(args):
+    if not config.IS_ROOT:
+        sys.exit("apply-config needs root.")
+    new = config.load_raw(Path(args.file))
+    try:
+        config.validate(new)
+        if new["user"]:
+            pwd.getpwnam(new["user"])
+    except (ValueError, KeyError) as e:
+        sys.exit(f"Settings not saved: {e}")
+    config.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    config.CONFIG_FILE.write_text(config.to_toml(new))
+    subprocess.run(["systemctl", "try-restart", "sentinel"], check=False)
+    print("Settings saved.")
+
+
+def cmd_gui(args):
+    from .gui import run_gui
+    run_gui()
 
 
 def main():
@@ -126,6 +160,12 @@ def main():
     d = sub.add_parser("delete", help="delete a quarantined program for good")
     d.add_argument("id")
     d.set_defaults(func=cmd_delete)
+    a = sub.add_parser("apply-config", help="check and use new settings (root)")
+    a.add_argument("file")
+    a.set_defaults(func=cmd_apply_config)
+    g = sub.add_parser("gui", help="open the Sentinel window")
+    g.add_argument("--tray", action="store_true", help="start hidden in the tray")
+    g.set_defaults(func=cmd_gui)
 
     args = parser.parse_args()
     setup_logging()

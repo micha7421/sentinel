@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Sentinel
+GenericName=Security Guard
+Comment=Ransomware protection and security center
+Exec=/usr/local/bin/sentinel gui
+Icon=security-high
+Categories=System;Security;Qt;
+Keywords=security;ransomware;antivirus;protection;
