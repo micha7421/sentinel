@@ -4,7 +4,7 @@ A background security guard for Linux. First-class on **Gentoo** (Portage) and
 **Arch-based** distros like **Tessera Linux** (pacman); works on KDE with
 systemd or OpenRC.
 
-## What it does (version 0.5)
+## What it does (version 0.6)
 
 **Ransomware guard**
 - Places trap files (`!sentinel-trap-do-not-touch.docx`) in your folders.
@@ -47,11 +47,14 @@ systemd or OpenRC.
   `package_scan_block` to have a high-risk package stop the install. It always
   fails open — a scanner hiccup never blocks your updates.
 
-**Security center**
+**Security center & hardening score**
 - One page listing every security tool on the PC with a green/red/grey status —
-  Sentinel itself, the firewall, Mullvad VPN, WireGuard, Tor, ClamAV, the SSH
-  server (warns if password login is on), disk encryption — plus one-click
-  actions like connecting Mullvad or updating ClamAV's database.
+  Sentinel itself, the firewall (nftables/firewalld/ufw), Mullvad VPN,
+  WireGuard, Tor, ClamAV, fail2ban, AppArmor/SELinux, the SSH server (warns if
+  password login is on), disk encryption — plus one-click actions like
+  connecting Mullvad or updating ClamAV's database.
+- A single **hardening score (0–100)** with the most valuable fixes listed
+  first, so you know what to improve next.
 
 > Sentinel is an extra layer, not a replacement for **backups** or an
 > antivirus. It does not catch every kind of malware (for example a program
@@ -123,7 +126,8 @@ attack, where it came from, abuse report), **Activity** (history and log),
 | `sudo sentinel test-breakin` | Safe test: VPN/Tor check, fake SSH attack, port scan of this PC |
 | `sudo sentinel test-threats` | Safe test: fake secret-reading, autostart drop, fork bomb |
 | `sudo sentinel check-system` | Check system programs against the package manager |
-| `sentinel security` | Show the status of all your security tools |
+| `sentinel security` | Show your security tools and hardening score |
+| `sudo sentinel setup` | First-run setup: write config, enable the service |
 | `sentinel scan-package FILE` | Scan a package for supply-chain risks |
 | `sentinel lookup IP` | Who is behind an IP? (VPN, Tor, location, owner) |
 | `sudo sentinel unblock IP` | Unblock an IP address |
@@ -158,7 +162,8 @@ Settings: `/etc/sentinel/config.toml`, or the Settings page in the window.
 - [x] Gentoo: ebuild/overlay and the Portage system check
 - [x] Spyware guard: secret-reading, autostart persistence, fork bombs
 - [x] Supply-chain guard: scan pacman packages before install
-- [x] Security center: all your security tools in one place
+- [x] Security center with a hardening score and fix list
+- [ ] Signed-package tamper detection (once the distro signs packages)
 
 ## Update
 

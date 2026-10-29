@@ -146,3 +146,14 @@ def guess_desktop_user():
 
 def expand(folder, home):
     return Path(home + folder[1:] if folder.startswith("~") else folder)
+
+
+def distro_name():
+    """The distro's pretty name from /etc/os-release, e.g. 'Tessera Linux'."""
+    try:
+        for line in Path("/etc/os-release").read_text().splitlines():
+            if line.startswith("PRETTY_NAME="):
+                return line.split("=", 1)[1].strip().strip('"') or "Linux"
+    except OSError:
+        pass
+    return "Linux"

@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QScrollArea, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
     QInputDialog, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QStackedWidget,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSpinBox, QStackedWidget,
     QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from . import breakin, config, packages, quarantine, securitycenter
@@ -606,6 +606,30 @@ class SecurityCenterPage(QWidget):
         self.win = win
         layout = QVBoxLayout(self)
         layout.addWidget(heading("Security center"))
+
+        # Hardening score header
+        self.score_box = QFrame()
+        self.score_box.setObjectName("card")
+        sb = QHBoxLayout(self.score_box)
+        sb.setContentsMargins(20, 14, 20, 14)
+        self.score_num = QLabel("–")
+        f = self.score_num.font()
+        f.setPointSizeF(f.pointSizeF() * 2.4)
+        f.setBold(True)
+        self.score_num.setFont(f)
+        sb.addWidget(self.score_num)
+        col = QVBoxLayout()
+        col.addWidget(QLabel("<b>Hardening score</b>"))
+        self.score_bar = QProgressBar()
+        self.score_bar.setRange(0, 100)
+        self.score_bar.setTextVisible(False)
+        self.score_bar.setFixedHeight(10)
+        col.addWidget(self.score_bar)
+        self.score_hint = hint("")
+        col.addWidget(self.score_hint)
+        sb.addLayout(col, 1)
+        layout.addWidget(self.score_box)
+
         layout.addWidget(hint("Your security tools in one place. A green dot means "
                               "good, red means it needs attention, grey means it is "
                               "not installed."))
@@ -622,7 +646,22 @@ class SecurityCenterPage(QWidget):
 
     def refresh(self):
         tools = securitycenter.collect()
+        s = securitycenter.score(self.win.cfg, tools)
+        color = GREEN if s["score"] >= 80 else (ORANGE if s["score"] >= 55 else RED)
+        self.score_num.setText(str(s["score"]))
+        self.score_num.setStyleSheet(f"color: {color.name()};")
+        self.score_bar.setValue(s["score"])
+        self.score_bar.setStyleSheet(
+            f"QProgressBar {{ border: none; background: palette(mid); border-radius: 5px; }}"
+            f"QProgressBar::chunk {{ background: {color.name()}; border-radius: 5px; }}")
+        if s["recommendations"]:
+            top = s["recommendations"][0]
+            self.score_hint.setText(f"Biggest win: {top['how']}")
+        else:
+            self.score_hint.setText("Everything that applies to this PC is in good shape. 🎉")
+
         sig = [(t["key"], t["state"], t["ok"], len(t["actions"])) for t in tools]
+        sig.append(s["score"])
         if sig == self._sig:
             return  # nothing changed, keep the buttons as they are
         self._sig = sig
@@ -968,6 +1007,10 @@ class MainWindow(QMainWindow):
         brand.addWidget(logo)
         brand.addWidget(name, 1)
         v.addLayout(brand)
+        distro = QLabel(config.distro_name())
+        distro.setContentsMargins(14, 0, 14, 6)
+        distro.setEnabled(False)  # subtle, follows the theme
+        v.addWidget(distro)
         v.addWidget(self.nav)
         h.addWidget(side)
         h.addWidget(self.stack, 1)

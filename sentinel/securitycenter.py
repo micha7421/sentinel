@@ -177,8 +177,58 @@ def probe_disk_encryption():
             "actions": []}
 
 
-PROBES = [probe_sentinel, probe_firewall, probe_mullvad, probe_wireguard,
-          probe_tor, probe_clamav, probe_sshd, probe_disk_encryption]
+def probe_apparmor():
+    if not (shutil.which("aa-status") or Path("/sys/kernel/security/apparmor").exists()):
+        return None
+    r = _run(["aa-status", "--enabled"])
+    enabled = r is not None and r.returncode == 0
+    return {"key": "apparmor", "name": "AppArmor", "installed": True, "ok": enabled,
+            "state": "Enforcing" if enabled else "Off",
+            "detail": "Confines programs so a break-in does less damage."
+            if enabled else "Installed but not enabled.", "actions": []}
+
+
+def probe_selinux():
+    if not shutil.which("getenforce"):
+        return None
+    r = _run(["getenforce"])
+    mode = (r.stdout.strip() if r else "") or "Unknown"
+    return {"key": "selinux", "name": "SELinux", "installed": True,
+            "ok": mode == "Enforcing", "state": mode,
+            "detail": "Confines programs (enforcing is best)." if mode != "Disabled"
+            else "Installed but disabled.", "actions": []}
+
+
+def probe_fail2ban():
+    if not _which("fail2ban-client"):
+        return None
+    active = _service_state("fail2ban") == "active"
+    return {"key": "fail2ban", "name": "Fail2ban", "installed": True, "ok": active,
+            "state": "Running" if active else "Stopped",
+            "detail": "Bans repeat attackers (Sentinel's break-in guard does this too).",
+            "actions": []}
+
+
+def probe_firewalld():
+    if not _which("firewall-cmd"):
+        return None
+    active = _service_state("firewalld") == "active"
+    return {"key": "firewalld", "name": "firewalld", "installed": True, "ok": active,
+            "state": "Running" if active else "Stopped", "detail": "", "actions": []}
+
+
+def probe_ufw():
+    if not _which("ufw"):
+        return None
+    r = _run(["ufw", "status"])
+    active = r is not None and "Status: active" in (r.stdout or "")
+    return {"key": "ufw", "name": "UFW firewall", "installed": True, "ok": active,
+            "state": "Active" if active else "Inactive", "detail": "", "actions": []}
+
+
+PROBES = [probe_sentinel, probe_firewall, probe_firewalld, probe_ufw,
+          probe_mullvad, probe_wireguard, probe_tor, probe_clamav, probe_fail2ban,
+          probe_apparmor, probe_selinux, probe_sshd, probe_disk_encryption]
 
 
 def collect():
@@ -191,3 +241,78 @@ def collect():
         except Exception as e:  # one broken probe must not break the page
             log.error("Security center probe %s failed: %s", probe.__name__, e)
     return tools
+
+
+# ---------- hardening score ----------
+
+def score(cfg, tools=None):
+    """A 0-100 hardening score plus the top things to fix.
+
+    Each check has a weight; checks that don't apply (a tool that isn't
+    installed) are left out of the total, so the score reflects this PC.
+    """
+    tools = tools if tools is not None else collect()
+    by_key = {t["key"]: t for t in tools}
+
+    def tool_ok(key):
+        t = by_key.get(key)
+        return None if (t is None or t["ok"] is None) else t["ok"]
+
+    # (label, weight, passed(True/False/None=n/a), how-to-fix)
+    checks = [
+        ("Sentinel is running", 3, tool_ok("sentinel"),
+         "Start it: systemctl enable --now sentinel"),
+        ("Ransomware guard is on", 2, True, "Turn it on in Settings."),
+        ("Break-in guard is on", 1, cfg.get("breakin_guard"),
+         "Turn on the break-in guard in Settings."),
+        ("Credential guard is on", 2, cfg.get("credential_guard"),
+         "Turn on the credential guard in Settings."),
+        ("Persistence guard is on", 1, cfg.get("persistence_guard"),
+         "Turn on the autostart guard in Settings."),
+        ("A firewall is active", 2,
+         _any(tool_ok("firewall"), tool_ok("firewalld"), tool_ok("ufw")),
+         "Load firewall rules (nftables/firewalld/ufw)."),
+        ("Daily system file check is on", 1, cfg.get("system_check") if packages_ok() else None,
+         "Turn on the system file check in Settings."),
+        ("Package scanning is on", 1, cfg.get("package_scan") if _which("pacman") else None,
+         "Turn on package scanning in Settings."),
+        ("Disk is encrypted", 3, tool_ok("luks"),
+         "Encrypting the disk needs a reinstall with LUKS; plan for it."),
+        ("SSH is safe", 2, tool_ok("sshd"),
+         "Turn off SSH password login (keys only) or stop the SSH server."),
+        ("Virus database is fresh", 1, tool_ok("clamav"),
+         "Update ClamAV: run freshclam."),
+        ("A sandbox (AppArmor/SELinux) is on", 1,
+         _any(tool_ok("apparmor"), tool_ok("selinux")),
+         "Enable AppArmor or SELinux for extra isolation."),
+    ]
+
+    total = got = 0
+    recommendations = []
+    for label, weight, passed, how in checks:
+        if passed is None:
+            continue
+        total += weight
+        if passed:
+            got += weight
+        else:
+            recommendations.append({"text": label.replace(" is ", " is not ")
+                                    .replace("is safe", "is not locked down")
+                                    .replace("A firewall is not active", "No firewall is active"),
+                                    "how": how, "weight": weight})
+    recommendations.sort(key=lambda r: r["weight"], reverse=True)
+    value = round(100 * got / total) if total else 100
+    return {"score": value, "recommendations": recommendations}
+
+
+def _any(*vals):
+    """True if any is True, False if all are False, None if all are n/a."""
+    real = [v for v in vals if v is not None]
+    if not real:
+        return None
+    return any(real)
+
+
+def packages_ok():
+    from . import packages
+    return packages.available()

@@ -12,7 +12,8 @@
   python -m sentinel lookup IP           who is behind an IP? (VPN, Tor, ...)
   python -m sentinel check-system        check system programs vs package manager
   python -m sentinel scan-package FILE   scan a package for supply-chain risks
-  python -m sentinel security            show the status of your security tools
+  python -m sentinel security            show security tools and hardening score
+  python -m sentinel setup               first-run setup (config + enable service)
   python -m sentinel test-threats        safe test of credential/persistence/crash guards
   python -m sentinel gui                 open the Sentinel window
 """
@@ -457,10 +458,54 @@ def cmd_test_threats(args):
 
 def cmd_security(args):
     mark = {True: "🟢", False: "🔴", None: "⚪"}
-    for t in securitycenter.collect():
+    cfg = config.load_raw()
+    tools = securitycenter.collect()
+    s = securitycenter.score(cfg, tools)
+    print(f"Hardening score: {s['score']}/100\n")
+    for t in tools:
         print(f"{mark[t['ok']]} {t['name']:22} {t['state']}")
         if t["detail"]:
             print(f"     {t['detail']}")
+    if s["recommendations"]:
+        print("\nTo improve your score:")
+        for r in s["recommendations"]:
+            print(f"  • {r['text']} — {r['how']}")
+
+
+def cmd_setup(args):
+    """First-run setup: write a good config, enable the service, scan the
+    system and print the score. Safe to run again."""
+    if not config.IS_ROOT:
+        sys.exit("Run setup with sudo:  sudo sentinel setup")
+    distro = config.distro_name()
+    print(f"Setting up Sentinel on {distro}.\n")
+
+    if not config.CONFIG_FILE.exists():
+        cfg = config.load_raw()
+        user = os.environ.get("SUDO_USER") or config.guess_desktop_user() or ""
+        cfg["user"] = user
+        config.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        config.CONFIG_FILE.write_text(config.to_toml(cfg))
+        print(f"✓ Wrote {config.CONFIG_FILE}" + (f" (desktop user: {user})" if user else ""))
+    else:
+        print(f"✓ Keeping your existing {config.CONFIG_FILE}")
+
+    if shutil.which("systemctl"):
+        r = subprocess.run(["systemctl", "enable", "--now", "sentinel"])
+        print("✓ Service enabled and started." if r.returncode == 0
+              else "! Could not enable the service (is it installed?).")
+
+    if packages.available():
+        print(f"Checking system files against {packages.name()}… ", flush=True)
+        r = system_check()
+        bad = len(r["changed"]) + len(r["missing"])
+        print(f"  {r['checked']} files checked, {bad} problem(s).")
+
+    s = securitycenter.score(config.load_raw())
+    print(f"\nHardening score: {s['score']}/100")
+    for rec in s["recommendations"][:5]:
+        print(f"  • {rec['text']} — {rec['how']}")
+    print("\nDone. Open the window any time:  sentinel gui")
 
 
 def cmd_gui(args):
@@ -499,7 +544,8 @@ def main():
     lk.add_argument("ip")
     lk.set_defaults(func=cmd_lookup)
     sub.add_parser("check-system", help="check system programs vs package manager").set_defaults(func=cmd_check_system)
-    sub.add_parser("security", help="show the status of your security tools").set_defaults(func=cmd_security)
+    sub.add_parser("security", help="show security tools and hardening score").set_defaults(func=cmd_security)
+    sub.add_parser("setup", help="first-run setup (writes config, enables service)").set_defaults(func=cmd_setup)
     sub.add_parser("test-threats", help="safe test of the credential/persistence/crash guards").set_defaults(func=cmd_test_threats)
     sp = sub.add_parser("scan-package", help="scan package files for supply-chain risks")
     sp.add_argument("files", nargs="*", help="package files (.pkg.tar.*); none = read names from stdin")
