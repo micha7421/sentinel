@@ -42,12 +42,17 @@ _libc.fanotify_init.argtypes = [ctypes.c_uint, ctypes.c_uint]
 _libc.fanotify_mark.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_uint64,
                                 ctypes.c_int, ctypes.c_char_p]
 
-# Processes that legitimately read many files (indexers, backups). They are
-# allowed to touch any watched file, including the bait.
-SYSTEM_READERS = {"baloo_file", "baloo", "tracker-miner-f", "tracker-extract",
-                  "updatedb", "mlocate", "locate", "plocate", "rsync", "borg",
-                  "restic", "tar", "duplicity", "rclone", "clamd", "clamscan",
-                  "freshclam"}
+# Which programs may read which secret. These are *binary names*, and a
+# reader is trusted only when its real executable has this name AND lives in a
+# genuine system location (see _trusted_location). So a thief that merely
+# renames itself "baloo_file" is NOT trusted: its binary is in /tmp or /home.
+#
+# Processes that legitimately read many files (indexers, backups). Allowed to
+# touch any watched file, including the bait.
+SYSTEM_READERS = {"baloo_file", "baloo", "tracker-miner-fs", "tracker-extract",
+                  "tracker-miner-f", "updatedb", "mlocate", "locate", "plocate",
+                  "rsync", "borg", "restic", "tar", "duplicity", "rclone",
+                  "clamd", "clamscan", "freshclam"}
 
 # Expected readers for each kind of real secret.
 SHADOW_READERS = {"unix_chkpwd", "passwd", "chpasswd", "sudo", "sudo.real",
@@ -55,12 +60,27 @@ SHADOW_READERS = {"unix_chkpwd", "passwd", "chpasswd", "sudo", "sudo.real",
                   "systemd-logind", "systemd-user", "gdm", "sddm", "sddm-helper",
                   "lightdm", "agetty", "useradd", "usermod", "userdel", "vipw",
                   "faillock", "pam_tally2", "polkitd", "accounts-daemon",
-                  "gkr-pam", "gnome-keyring-d"}
+                  "gkr-pam", "gnome-keyring-daemon", "gnome-keyring-d"}
 SSH_READERS = {"ssh", "sshd", "sshd-session", "ssh-agent", "ssh-add",
-               "ssh-keygen", "scp", "sftp", "sftp-server", "git", "git-remote-ssh",
-               "rsync", "mosh", "mosh-server", "gpg-agent", "keychain",
-               "gnome-keyring-d", "kwalletd5", "kwalletd6", "ansible"}
+               "ssh-keygen", "scp", "sftp", "sftp-server", "git",
+               "git-remote-ssh", "rsync", "mosh", "mosh-server", "gpg-agent",
+               "keychain", "gnome-keyring-daemon", "kwalletd5", "kwalletd6",
+               "ansible"}
 NM_READERS = {"NetworkManager", "nm-online", "nm-applet", "wpa_supplicant"}
+
+# Directories a genuine system program lives in (used when Portage can't tell).
+SYSTEM_DIRS = ("/usr/bin/", "/usr/sbin/", "/bin/", "/sbin/", "/usr/libexec/",
+               "/usr/lib/", "/usr/lib64/", "/lib/", "/lib64/", "/opt/")
+
+
+def _trusted_location(exe):
+    """True if this executable looks like a genuine installed program and not
+    something dropped in /tmp or a home folder. On Gentoo we ask Portage; on
+    other systems we fall back to the standard system directories."""
+    from . import portage_db
+    if portage_db.available():
+        return portage_db.owner(exe) is not None
+    return exe.startswith(SYSTEM_DIRS)
 
 BAIT_PRIVATE_KEY = """-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -204,6 +224,17 @@ class CredentialGuard:
 
     # ---------- reaction ----------
 
+    def is_trusted_reader(self, proc, path):
+        """A reader is trusted only if its REAL binary has an allowed name and
+        sits in a genuine system location. This defeats the rename trick: a
+        thief calling itself 'baloo_file' runs from /tmp, so it fails here."""
+        allowed = self.readers | self.watched.get(path, set())
+        try:
+            exe = os.path.realpath(proc.exe())
+        except (psutil.Error, OSError):
+            return False
+        return bool(exe) and os.path.basename(exe) in allowed and _trusted_location(exe)
+
     def on_open(self, path, pid):
         try:
             proc = psutil.Process(pid)
@@ -212,9 +243,8 @@ class CredentialGuard:
             name = "a program that already exited"
             proc = None
 
-        allowed = self.watched.get(path, set())
-        if name in self.readers or name in allowed:
-            return  # an expected reader, fine
+        if proc and self.is_trusted_reader(proc, path):
+            return  # a genuine expected reader, fine
 
         now = time.time()
         if now - self.recent.get((pid, path), 0) < 10:

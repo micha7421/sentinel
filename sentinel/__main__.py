@@ -299,13 +299,20 @@ def cmd_test_threats(args):
     cfg = config.load()
     cfg["home"] = str(home)
     results = []
-    # Run a COPY of the probe from inside the test folder, so if the guard
-    # quarantines it (it will, for the bait read) the real file is untouched.
-    probe = folder / ".threat_probe.py"
-    shutil.copy(Path(__file__).parent / "threat_probe.py", probe)
+    # The guard quarantines the script a "thief" runs, so give every probe run
+    # its OWN fresh copy inside the test folder (the packaged source stays put).
+    source_probe = Path(__file__).parent / "threat_probe.py"
+    counter = [0]
 
-    def run_probe(*paths):
-        p = subprocess.Popen([sys.executable, str(probe), str(folder), *map(str, paths)])
+    def fresh_probe():
+        counter[0] += 1
+        copy = folder / f".probe{counter[0]}.py"
+        shutil.copy(source_probe, copy)
+        return copy
+
+    def run_probe(interpreter, *paths):
+        probe = fresh_probe()
+        p = subprocess.Popen([interpreter, str(probe), str(folder), *map(str, paths)])
         try:
             p.wait(timeout=10)
         except subprocess.TimeoutExpired:
@@ -319,12 +326,28 @@ def cmd_test_threats(args):
     if cred.start():
         time.sleep(0.3)
         bait = next(iter(cred.bait), None)
-        run_probe(fake_shadow, home / ".ssh/id_rsa", *( [bait] if bait else [] ))
+        run_probe(sys.executable, fake_shadow, home / ".ssh/id_rsa",
+                  *([bait] if bait else []))
         time.sleep(0.5)
         cred.stop()
         results.append(("Reading /etc/shadow-style file is detected", cred.alarm_count >= 1))
         results.append(("Reading a decoy password file is detected", bait is not None
                         and cred.alarm_count >= 2))
+
+        # Evasion: a program that renames itself to a trusted name ("baloo_file")
+        # but runs from the wrong place must still be caught.
+        if bait:
+            cred2 = CredentialGuard(cfg, home=home, test=True, watch={})
+            if cred2.start():
+                time.sleep(0.3)
+                disguised = folder / "baloo_file"      # a trusted name...
+                shutil.copy(sys.executable, disguised)  # ...but in the test folder
+                run_probe(str(disguised), bait)         # fresh probe copy
+                time.sleep(0.5)
+                cred2.stop()
+                results.append(("A thief disguised as 'baloo_file' is still caught",
+                                cred2.alarm_count >= 1))
+
         for item in quarantine.list_items():  # clean up anything quarantined
             if str(folder) in item["original"] or "threat_probe" in item["original"]:
                 quarantine.delete(item["id"])

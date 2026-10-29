@@ -114,6 +114,10 @@ Settings: `/etc/sentinel/config.toml`, or the Settings page in the window.
   it catches whole families of attacks — but a program that does none of those
   things can still slip by. It is a strong extra layer, not a complete
   antivirus, and not a substitute for backups.
+- A trusted reader of your secrets is recognised by its real executable (and,
+  on Gentoo, by Portage owning that file), not just its name — so malware that
+  renames itself `baloo_file` or `sshd` to look harmless is still caught,
+  because its binary sits in `/tmp` or your home folder, not in the system.
 
 ## Coming next
 
