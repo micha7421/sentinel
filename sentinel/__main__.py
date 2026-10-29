@@ -12,6 +12,7 @@
   python -m sentinel lookup IP           who is behind an IP? (VPN, Tor, ...)
   python -m sentinel check-system        check system programs vs package manager
   python -m sentinel scan-package FILE   scan a package for supply-chain risks
+  python -m sentinel security            show the status of your security tools
   python -m sentinel test-threats        safe test of credential/persistence/crash guards
   python -m sentinel gui                 open the Sentinel window
 """
@@ -31,7 +32,7 @@ import time
 from pathlib import Path
 
 from . import (breakin, config, firewall, ipintel, notify, packages,
-               quarantine)
+               quarantine, securitycenter)
 from .credential import CredentialGuard
 from .crash import CrashGuard
 from .notify import popup
@@ -454,6 +455,14 @@ def cmd_test_threats(args):
     sys.exit(0 if all(ok for _, ok in results) else 1)
 
 
+def cmd_security(args):
+    mark = {True: "🟢", False: "🔴", None: "⚪"}
+    for t in securitycenter.collect():
+        print(f"{mark[t['ok']]} {t['name']:22} {t['state']}")
+        if t["detail"]:
+            print(f"     {t['detail']}")
+
+
 def cmd_gui(args):
     try:
         from .gui import run_gui
@@ -489,7 +498,8 @@ def main():
     lk = sub.add_parser("lookup", help="who is behind an IP? (VPN, Tor, ...)")
     lk.add_argument("ip")
     lk.set_defaults(func=cmd_lookup)
-    sub.add_parser("check-system", help="Gentoo: check system programs").set_defaults(func=cmd_check_system)
+    sub.add_parser("check-system", help="check system programs vs package manager").set_defaults(func=cmd_check_system)
+    sub.add_parser("security", help="show the status of your security tools").set_defaults(func=cmd_security)
     sub.add_parser("test-threats", help="safe test of the credential/persistence/crash guards").set_defaults(func=cmd_test_threats)
     sp = sub.add_parser("scan-package", help="scan package files for supply-chain risks")
     sp.add_argument("files", nargs="*", help="package files (.pkg.tar.*); none = read names from stdin")

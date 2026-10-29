@@ -2,7 +2,7 @@
 # Sentinel: a background security guard (ransomware, break-in, spyware).
 # Packaged for Arch-based distros such as Tessera Linux.
 pkgname=sentinel
-pkgver=0.4.0
+pkgver=0.5.0
 pkgrel=1
 pkgdesc="Background security guard: ransomware, break-in and spyware protection"
 arch=('any')

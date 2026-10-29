@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QStackedWidget,
     QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import breakin, config, packages, quarantine
+from . import breakin, config, packages, quarantine, securitycenter
 
 STATUS_TEXT = {"blocked": "Blocked in the firewall.", "expired": "The block has expired.",
                "unblocked": "Unblocked.", "not blocked": "Not blocked."}
@@ -597,6 +597,66 @@ class BreakinsPage(QWidget):
             self.win.run_root(["unblock", a["ip"]], f"{a['ip']} unblocked.")
 
 
+class SecurityCenterPage(QWidget):
+    """One place to see every security tool on the PC and its state."""
+    DOT = {True: "#27ae60", False: "#da4453", None: "#999999"}
+
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        layout = QVBoxLayout(self)
+        layout.addWidget(heading("Security center"))
+        layout.addWidget(hint("Your security tools in one place. A green dot means "
+                              "good, red means it needs attention, grey means it is "
+                              "not installed."))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.body = QWidget()
+        self.list = QVBoxLayout(self.body)
+        self.list.setContentsMargins(0, 0, 8, 0)
+        self.list.addStretch()
+        scroll.setWidget(self.body)
+        layout.addWidget(scroll, 1)
+        self._sig = None
+
+    def refresh(self):
+        tools = securitycenter.collect()
+        sig = [(t["key"], t["state"], t["ok"], len(t["actions"])) for t in tools]
+        if sig == self._sig:
+            return  # nothing changed, keep the buttons as they are
+        self._sig = sig
+
+        while self.list.count() > 1:  # drop everything but the trailing stretch
+            item = self.list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for t in tools:
+            card = QFrame()
+            card.setObjectName("stat")
+            row = QHBoxLayout(card)
+            dot = QLabel("●")
+            dot.setStyleSheet(f"color: {self.DOT[t['ok']]}; font-size: 20px;")
+            row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
+            text = QVBoxLayout()
+            title = QLabel(f"<b>{t['name']}</b> — {t['state']}")
+            title.setTextFormat(Qt.TextFormat.RichText)
+            text.addWidget(title)
+            if t["detail"]:
+                text.addWidget(hint(t["detail"]))
+            row.addLayout(text, 1)
+            for action in t["actions"]:
+                btn = QPushButton(action["label"])
+                btn.clicked.connect(lambda _=False, a=action: self.run(a))
+                row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            self.list.insertWidget(self.list.count() - 1, card)
+
+    def run(self, action):
+        self._sig = None  # force a redraw after it runs
+        self.win.run_tool_action(action)
+
+
 class SettingsPage(QWidget):
     def __init__(self, win):
         super().__init__()
@@ -856,8 +916,8 @@ class TestDialog(QDialog):
 
 class MainWindow(QMainWindow):
     PAGES = [("Overview", "security-high"), ("Quarantine", "folder-locked"),
-             ("Break-ins", "network-firewall"), ("Activity", "view-history"),
-             ("Settings", "configure")]
+             ("Break-ins", "network-firewall"), ("Security", "preferences-security"),
+             ("Activity", "view-history"), ("Settings", "configure")]
 
     def __init__(self):
         super().__init__()
@@ -882,7 +942,7 @@ class MainWindow(QMainWindow):
         self.nav.setIconSize(QSize(22, 22))
         self.stack = QStackedWidget()
         self.pages = [OverviewPage(self), QuarantinePage(self), BreakinsPage(self),
-                      ActivityPage(self), SettingsPage(self)]
+                      SecurityCenterPage(self), ActivityPage(self), SettingsPage(self)]
         for (name, icon), page in zip(self.PAGES, self.pages):
             self.nav.addItem(QListWidgetItem(theme_icon(icon), name))
             wrapper = QWidget()
@@ -1007,6 +1067,13 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Sentinel", output or "Something went wrong.")
             self.refresh()
         self.tasks.append(RootTask(self, args, done))
+
+    def run_tool_action(self, action):
+        argv = (["pkexec"] + action["argv"]) if action.get("root") else action["argv"]
+        proc = QProcess(self)
+        proc.finished.connect(lambda *a: self.refresh())
+        proc.start(argv[0], argv[1:])
+        self.tasks.append(proc)
 
     def start_service(self):
         if config.INSTALLED:
