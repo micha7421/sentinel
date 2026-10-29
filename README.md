@@ -3,7 +3,7 @@
 A background security guard for Linux, built for Gentoo (works on KDE with
 systemd or OpenRC).
 
-## What it does (version 0.3)
+## What it does (version 0.4)
 
 **Ransomware guard**
 - Places trap files (`!sentinel-trap-do-not-touch.docx`) in your folders.
@@ -19,6 +19,18 @@ systemd or OpenRC).
 - Looks up where the attacker's IP comes from and whether it's a **VPN, Tor,
   a rented server or home internet**, using daily-updated lists plus optional
   online lookups. Can copy a ready-made abuse report for you.
+
+**Spyware & sabotage guard**
+- Warns the moment a program reads your secrets — password hashes
+  (`/etc/shadow`), SSH private keys, saved WiFi passwords — or opens a decoy
+  "password" file Sentinel plants as bait. Opening the bait gets the program
+  stopped and quarantined.
+- Warns when something adds itself to **autostart** (`~/.config/autostart`,
+  systemd user units, cron, login scripts like `~/.bashrc`) — the trick USB
+  malware uses to run again at every login.
+- Catches **fork bombs** (a program that copies itself until the PC freezes)
+  and freezes the runaway processes. Off by default, because compiling on
+  Gentoo also starts many processes.
 
 **Gentoo system check**
 - Once a day, compares your installed programs (`/usr/bin`, PAM modules, ...)
@@ -79,6 +91,7 @@ attack, where it came from, abuse report), **Activity** (history and log),
 | `sentinel gui` | Opens the window |
 | `sudo sentinel test-ransomware` | Safe test: fake ransomware in a throwaway folder |
 | `sudo sentinel test-breakin` | Safe test: VPN/Tor check, fake SSH attack, port scan of this PC |
+| `sudo sentinel test-threats` | Safe test: fake secret-reading, autostart drop, fork bomb |
 | `sudo sentinel check-system` | Gentoo: check system programs against Portage |
 | `sentinel lookup IP` | Who is behind an IP? (VPN, Tor, location, owner) |
 | `sudo sentinel unblock IP` | Unblock an IP address |
@@ -96,15 +109,20 @@ Settings: `/etc/sentinel/config.toml`, or the Settings page in the window.
   you, so most break-in entries will come from your own network or from tests.
 - The attacker's location and network type are a good guess, not proof. Never
   attack back: it is illegal, and the IP is often an innocent, hacked computer.
+- Sentinel spots malware by its **behaviour** (encrypting files, reading
+  secrets, adding autostart, flooding processes), not by a virus signature, so
+  it catches whole families of attacks — but a program that does none of those
+  things can still slip by. It is a strong extra layer, not a complete
+  antivirus, and not a substitute for backups.
 
 ## Coming next
 
 - [x] Ransomware guard, window and tray icon
 - [x] Break-in guard with VPN/Tor check
 - [x] Gentoo: ebuild/overlay and the Portage system check
+- [x] Spyware guard: secret-reading, autostart persistence, fork bombs
 - [ ] Security center: find and control your other tools (Mullvad VPN,
       firewall, ClamAV, ...) from one place
-- [ ] Watch for programs reading sensitive files (SSH keys, password stores)
 
 ## Update
 

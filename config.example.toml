@@ -53,3 +53,20 @@ trusted_ips = ["127.0.0.0/8", "::1/128"]
 
 # Check system programs against Portage's records once a day
 system_check = true
+
+# ---------- Spyware & sabotage guard ----------
+
+# Warn when a program reads your secrets (/etc/shadow, SSH keys, WiFi passwords)
+credential_guard = true
+credential_bait = true            # plant decoy password files as bait
+credential_auto_kill = true       # stop a program that opens a decoy file
+credential_auto_quarantine = true
+credential_readers = []           # extra program names allowed to read secrets
+
+# Warn when something adds itself to autostart, cron or a login script
+persistence_guard = true
+
+# Catch fork bombs (process explosions). Off by default: compiling on Gentoo
+# starts many processes and could look like one. Raise the limit if you turn it on.
+crash_guard = false
+crash_max_children = 200

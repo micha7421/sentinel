@@ -63,6 +63,22 @@ DEFAULTS = {
     # Addresses that are never blocked (e.g. your other PCs).
     "trusted_ips": ["127.0.0.0/8", "::1/128"],
 
+    # Credential-theft guard: warn when something reads your secrets
+    # (/etc/shadow, SSH keys, WiFi passwords) or a planted decoy file.
+    "credential_guard": True,
+    "credential_bait": True,          # plant decoy password files as bait
+    "credential_auto_kill": True,     # stop programs that touch the decoys
+    "credential_auto_quarantine": True,
+    "credential_readers": [],         # extra programs allowed to read secrets
+
+    # Persistence guard: warn when something adds itself to autostart/cron/etc.
+    "persistence_guard": True,
+
+    # Crash guard (fork-bomb detector). OFF by default: compiling on Gentoo
+    # starts many processes and could look like a fork bomb.
+    "crash_guard": False,
+    "crash_max_children": 200,
+
     # Gentoo: check system programs against Portage's records once a day.
     "system_check": True,
 }

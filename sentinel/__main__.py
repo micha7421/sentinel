@@ -11,12 +11,14 @@
   python -m sentinel unblock IP          unblock an IP address
   python -m sentinel lookup IP           who is behind an IP? (VPN, Tor, ...)
   python -m sentinel check-system        Gentoo: check system programs
+  python -m sentinel test-threats        safe test of credential/persistence/crash guards
   python -m sentinel gui                 open the Sentinel window
 """
 
 import argparse
 import json
 import logging
+import os
 import pwd
 import shutil
 import signal
@@ -27,8 +29,12 @@ import threading
 import time
 from pathlib import Path
 
-from . import breakin, config, firewall, ipintel, notify, portage_db, quarantine
+from . import (breakin, config, firewall, ipintel, notify, portage_db,
+               quarantine)
+from .credential import CredentialGuard
+from .crash import CrashGuard
 from .notify import popup
+from .persistence import PersistenceGuard
 from .ransomware import RansomwareGuard
 
 
@@ -51,20 +57,24 @@ def cmd_run(args):
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
 
-    guard = RansomwareGuard(cfg)
-    guard.start()
-    breakin_guard = None
+    guards = [RansomwareGuard(cfg)]
     if cfg["breakin_guard"]:
-        breakin_guard = breakin.BreakinGuard(cfg)
-        breakin_guard.start()
+        guards.append(breakin.BreakinGuard(cfg))
+    if cfg["credential_guard"]:
+        guards.append(CredentialGuard(cfg))
+    if cfg["persistence_guard"]:
+        guards.append(PersistenceGuard(cfg))
+    if cfg["crash_guard"]:
+        guards.append(CrashGuard(cfg))
+    for g in guards:
+        g.start()
     if cfg["system_check"] and portage_db.available():
         threading.Thread(target=daily_system_check, args=(stop,), daemon=True).start()
 
     popup("Sentinel is running", "Your PC is being protected.", "low")
     stop.wait()
-    guard.stop()
-    if breakin_guard:
-        breakin_guard.stop()
+    for g in guards:
+        g.stop()
     logging.getLogger("sentinel").info("Sentinel stopped.")
 
 
@@ -272,6 +282,94 @@ def cmd_test_breakin(args):
     sys.exit(0 if all(ok for _, ok in results) else 1)
 
 
+def cmd_test_threats(args):
+    """Safe test of the credential, persistence and crash guards, all inside a
+    throwaway folder. Nothing real is read, moved or harmed."""
+    folder = config.DATA_DIR / "threat-test"
+    shutil.rmtree(folder, ignore_errors=True)
+    (folder / "home/.ssh").mkdir(parents=True)
+    (folder / "home/Documents").mkdir(parents=True)
+    (folder / ".sentinel-test-folder").touch()
+    home = folder / "home"
+    # Stand-ins for the real secrets, so we never touch the real ones.
+    fake_shadow = folder / "shadow"
+    fake_shadow.write_text("root:$6$fakehash:19000:0:99999:7:::\n")
+    (home / ".ssh/id_rsa").write_text("FAKE TEST KEY, not a real one\n")
+
+    cfg = config.load()
+    cfg["home"] = str(home)
+    results = []
+    # Run a COPY of the probe from inside the test folder, so if the guard
+    # quarantines it (it will, for the bait read) the real file is untouched.
+    probe = folder / ".threat_probe.py"
+    shutil.copy(Path(__file__).parent / "threat_probe.py", probe)
+
+    def run_probe(*paths):
+        p = subprocess.Popen([sys.executable, str(probe), str(folder), *map(str, paths)])
+        try:
+            p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+        return p
+
+    print("1) Credential guard: a test program reads fake secrets and bait")
+    cred = CredentialGuard(cfg, home=home, test=True,
+                           watch={str(fake_shadow): set(),
+                                  str(home / ".ssh/id_rsa"): {"ssh", "sshd"}})
+    if cred.start():
+        time.sleep(0.3)
+        bait = next(iter(cred.bait), None)
+        run_probe(fake_shadow, home / ".ssh/id_rsa", *( [bait] if bait else [] ))
+        time.sleep(0.5)
+        cred.stop()
+        results.append(("Reading /etc/shadow-style file is detected", cred.alarm_count >= 1))
+        results.append(("Reading a decoy password file is detected", bait is not None
+                        and cred.alarm_count >= 2))
+        for item in quarantine.list_items():  # clean up anything quarantined
+            if str(folder) in item["original"] or "threat_probe" in item["original"]:
+                quarantine.delete(item["id"])
+    else:
+        print("   (needs root; skipped)")
+
+    print("2) Persistence guard: a test entry is dropped into autostart")
+    pers = PersistenceGuard(cfg, home=home, test=True)
+    pers.start()
+    time.sleep(0.3)
+    (home / ".config/autostart").mkdir(parents=True, exist_ok=True)
+    (home / ".config/autostart/evil.desktop").write_text(
+        "[Desktop Entry]\nType=Application\nExec=/tmp/whatever\n")
+    with open(home / ".bashrc", "a") as f:
+        f.write("\n# added by a test\n/tmp/whatever &\n")
+    time.sleep(1.0)
+    pers.stop()
+    results.append(("New autostart entry is detected", pers.alarm_count >= 1))
+
+    print("3) Crash guard: a small, capped burst of processes")
+    crashg = CrashGuard(cfg, test=True)
+    crashg.limit = 15
+    crashg.start()
+    # Spawn the burst under its OWN session leader, so freezing that family
+    # can never reach this test process.
+    burst = subprocess.Popen(
+        ["sh", "-c", "for i in $(seq 1 20); do sleep 20 & done; wait"],
+        start_new_session=True)
+    time.sleep(2.5)
+    crashg.stop()
+    try:  # unfreeze and clean up the whole burst group
+        os.killpg(burst.pid, signal.SIGCONT)
+        os.killpg(burst.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    burst.kill()
+    results.append(("Fork bomb (process explosion) is detected", crashg.alarm_count >= 1))
+
+    shutil.rmtree(folder, ignore_errors=True)
+    print()
+    for name, ok in results:
+        print(("✅ " if ok else "❌ ") + name)
+    sys.exit(0 if all(ok for _, ok in results) else 1)
+
+
 def cmd_gui(args):
     try:
         from .gui import run_gui
@@ -308,6 +406,7 @@ def main():
     lk.add_argument("ip")
     lk.set_defaults(func=cmd_lookup)
     sub.add_parser("check-system", help="Gentoo: check system programs").set_defaults(func=cmd_check_system)
+    sub.add_parser("test-threats", help="safe test of the credential/persistence/crash guards").set_defaults(func=cmd_test_threats)
     g = sub.add_parser("gui", help="open the Sentinel window")
     g.add_argument("--tray", action="store_true", help="start hidden in the tray")
     g.set_defaults(func=cmd_gui)

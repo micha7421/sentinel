@@ -195,7 +195,7 @@ class OverviewPage(QWidget):
         grid.setSpacing(12)
         self.stats = {}
         for i, (key, label) in enumerate([
-                ("folders", "Protected folders"), ("alarms", "Ransomware alarms"),
+                ("folders", "Protected folders"), ("alarms", "Threat alarms"),
                 ("attacks", "Break-in attempts"), ("quarantine", "In quarantine"),
                 ("last", "Last alarm")]):
             box = QFrame()
@@ -245,10 +245,15 @@ class OverviewPage(QWidget):
         breakin_btn.setToolTip("Checks the VPN/Tor lists, simulates an SSH attack from "
                                "a test address and scans this PC.")
         breakin_btn.clicked.connect(lambda: TestDialog(win, "test-breakin").show())
+        threats_btn = QPushButton(theme_icon("security-low"), "Run threat test")
+        threats_btn.setToolTip("Safely checks the credential, persistence and crash "
+                               "guards in a throwaway folder (nothing real is touched).")
+        threats_btn.clicked.connect(lambda: TestDialog(win, "test-threats").show())
         popup_btn = QPushButton(theme_icon("preferences-desktop-notification"), "Show test popup")
         popup_btn.clicked.connect(lambda: RootTask(self, ["test-popup"], lambda *a: None))
         row.addWidget(test_btn)
         row.addWidget(breakin_btn)
+        row.addWidget(threats_btn)
         row.addWidget(popup_btn)
         row.addStretch()
         layout.addWidget(tests)
@@ -315,7 +320,10 @@ class OverviewPage(QWidget):
             f"{cfg['window_seconds']} seconds and look encrypted.<br>"
             f"Break-in guard: {onoff(cfg['breakin_guard'])} &nbsp;&nbsp; "
             f"Block attackers: {onoff(cfg['auto_block'])} &nbsp;&nbsp; "
-            f"VPN/Tor check: <b style='color:#27ae60'>On</b>")
+            f"VPN/Tor check: <b style='color:#27ae60'>On</b><br>"
+            f"Credential guard: {onoff(cfg['credential_guard'])} &nbsp;&nbsp; "
+            f"Autostart guard: {onoff(cfg['persistence_guard'])} &nbsp;&nbsp; "
+            f"Fork-bomb guard: {onoff(cfg['crash_guard'])}")
         self.refresh_syscheck()
 
     def refresh_syscheck(self):
@@ -660,6 +668,21 @@ class SettingsPage(QWidget):
         v.addLayout(self.list_buttons(self.trusted, self.add_trusted))
         layout.addWidget(group)
 
+        group = QGroupBox("Spyware && sabotage guard")
+        v = QVBoxLayout(group)
+        self.credential_guard = QCheckBox("Warn when something reads your secrets "
+                                          "(/etc/shadow, SSH keys, WiFi passwords)")
+        self.credential_bait = QCheckBox("Plant decoy password files as bait")
+        self.credential_kill = QCheckBox("Stop a program that opens a decoy file")
+        self.persistence_guard = QCheckBox("Warn when something adds itself to autostart, "
+                                           "cron or a login script")
+        self.crash_guard = QCheckBox("Catch fork bombs (process explosions) — "
+                                     "may misfire while compiling, off by default")
+        for box in (self.credential_guard, self.credential_bait, self.credential_kill,
+                    self.persistence_guard, self.crash_guard):
+            v.addWidget(box)
+        layout.addWidget(group)
+
         group = QGroupBox("Gentoo")
         v = QVBoxLayout(group)
         self.system_check = QCheckBox("Check system programs against Portage's records once a day")
@@ -741,6 +764,11 @@ class SettingsPage(QWidget):
         self.scan_seconds.setValue(cfg["scan_window_seconds"])
         self.trusted.clear()
         self.trusted.addItems(cfg["trusted_ips"])
+        self.credential_guard.setChecked(cfg["credential_guard"])
+        self.credential_bait.setChecked(cfg["credential_bait"])
+        self.credential_kill.setChecked(cfg["credential_auto_kill"])
+        self.persistence_guard.setChecked(cfg["persistence_guard"])
+        self.crash_guard.setChecked(cfg["crash_guard"])
         self.system_check.setChecked(cfg["system_check"])
         self.loaded = True
 
@@ -763,6 +791,11 @@ class SettingsPage(QWidget):
             "scan_ports": self.scan_ports.value(),
             "scan_window_seconds": self.scan_seconds.value(),
             "trusted_ips": [self.trusted.item(i).text() for i in range(self.trusted.count())],
+            "credential_guard": self.credential_guard.isChecked(),
+            "credential_bait": self.credential_bait.isChecked(),
+            "credential_auto_kill": self.credential_kill.isChecked(),
+            "persistence_guard": self.persistence_guard.isChecked(),
+            "crash_guard": self.crash_guard.isChecked(),
             "system_check": self.system_check.isChecked(),
         })
         fd, path = tempfile.mkstemp(prefix="sentinel-", suffix=".toml")
@@ -782,6 +815,7 @@ class TestDialog(QDialog):
     def __init__(self, parent, command):
         super().__init__(parent)
         self.setWindowTitle({"test-ransomware": "Ransomware test",
+                             "test-threats": "Threat test (credentials, autostart, crash)",
                              "test-breakin": "Break-in test"}[command])
         self.resize(640, 360)
         layout = QVBoxLayout(self)
