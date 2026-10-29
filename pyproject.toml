@@ -13,9 +13,13 @@ dependencies = ["psutil", "watchdog"]
 
 [project.optional-dependencies]
 gui = ["PyQt6"]
+dev = ["pytest", "pyflakes"]
 
 [project.scripts]
 sentinel = "sentinel.__main__:main"
 
 [tool.setuptools]
 packages = ["sentinel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

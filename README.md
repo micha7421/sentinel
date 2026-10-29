@@ -1,5 +1,7 @@
 # 🛡️ Sentinel
 
+![CI](https://github.com/micha7421/sentinel/actions/workflows/ci.yml/badge.svg)
+
 A background security guard for Linux. First-class on **Gentoo** (Portage) and
 **Arch-based** distros like **Tessera Linux** (pacman); works on KDE with
 systemd or OpenRC.
@@ -169,6 +171,28 @@ Settings: `/etc/sentinel/config.toml`, or the Settings page in the window.
 
 With the overlay: `sudo emerge --sync sentinel && sudo emerge -u app-antivirus/sentinel`.
 Otherwise: `cd sentinel && git pull && sudo ./install.sh`.
+
+## Developing & tests
+
+Sentinel has an automated test suite (unit tests for the package parsers, the
+IP/VPN classifier, the SSH/packet parsing, the quarantine path-safety, the
+credential trust logic, the hardening score, and more). GitHub Actions runs it
+with pyflakes on Python 3.11–3.13 for every push.
+
+```bash
+pip install psutil watchdog pytest pyflakes
+python -m pyflakes sentinel
+python -m pytest tests/ -q
+```
+
+The root-only, hardware-touching parts (fanotify, nftables, the KDE popups) are
+exercised by the built-in safe self-tests instead:
+
+```bash
+sudo sentinel test-ransomware
+sudo sentinel test-breakin
+sudo sentinel test-threats
+```
 
 ## Uninstall
 
