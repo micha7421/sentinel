@@ -6,6 +6,7 @@ import shutil
 import time
 from pathlib import Path
 
+from . import portage_db
 from .config import QUARANTINE_DIR
 
 # Never quarantine files from these places: they belong to the system
@@ -20,14 +21,16 @@ def is_system_file(path):
 
 def files_to_quarantine(exe, cmdline):
     """The program file itself, or the script it runs if the program is
-    a system interpreter like python or bash."""
+    a system interpreter like python or bash. Never files that a Gentoo
+    package installed."""
     found = []
     if exe and not is_system_file(exe) and os.path.isfile(exe):
         found.append(exe)
     for arg in cmdline[1:]:
         if os.path.isfile(arg) and not is_system_file(os.path.abspath(arg)):
             found.append(os.path.abspath(arg))
-    return list(dict.fromkeys(found))
+    found = [f for f in dict.fromkeys(found) if not portage_db.owner(f)]
+    return found
 
 
 def quarantine(path, reason):

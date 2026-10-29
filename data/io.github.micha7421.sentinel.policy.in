@@ -12,6 +12,6 @@
       <!-- remember the password for a few minutes -->
       <allow_active>auth_admin_keep</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/sentinel</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">@BINDIR@/sentinel</annotate>
   </action>
 </policyconfig>

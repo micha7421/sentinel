@@ -1,7 +1,12 @@
-# Sentinel settings. After changing: sudo systemctl restart sentinel
+# Sentinel settings. After changing: restart Sentinel
+#   systemd: sudo systemctl restart sentinel    OpenRC: sudo rc-service sentinel restart
+# (Or change them in the Sentinel window, which does this for you.)
 
-# Your username (gets the popups, ~ means this user's home folder)
+# Your username (gets the popups, ~ means this user's home folder).
+# Empty = find it automatically (works if the PC has one user account).
 user = ""
+
+# ---------- Ransomware guard ----------
 
 # Folders to protect from ransomware
 watch_dirs = ["~/Documents", "~/Pictures", "~/Desktop", "~/Downloads", "~/Music", "~/Videos"]
@@ -21,3 +26,30 @@ auto_quarantine = true
 allowlist = ["dolphin", "plasmashell", "baloo_file", "kio_file", "kioworker",
              "rsync", "borg", "restic", "git", "tar", "ark", "kdeconnectd",
              "syncthing", "nextcloud"]
+
+# ---------- Break-in guard ----------
+
+breakin_guard = true
+
+# Block attackers in the firewall (nftables), and for how many hours
+auto_block = true
+block_hours = 24
+
+# SSH attack: this many failed logins within this many minutes
+ssh_max_failures = 5
+ssh_window_minutes = 10
+
+# Port scan: this many different ports within this many seconds
+scan_ports = 15
+scan_window_seconds = 20
+
+# Look up location, provider and owner of attackers online (ipinfo.io, rdap.org)
+ip_lookup = true
+
+# Addresses that are never blocked, e.g. "192.168.1.10" or "192.168.1.0/24"
+trusted_ips = ["127.0.0.0/8", "::1/128"]
+
+# ---------- Gentoo ----------
+
+# Check system programs against Portage's records once a day
+system_check = true

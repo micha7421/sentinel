@@ -23,6 +23,8 @@ else:
     LOG_FILE = Path.home() / ".local/state/sentinel/sentinel.log"
 QUARANTINE_DIR = DATA_DIR / "quarantine"
 EVENTS_FILE = DATA_DIR / "events.jsonl"  # history of alarms, one JSON per line
+ATTACKS_FILE = DATA_DIR / "attacks.jsonl"  # history of break-in attempts
+INTEGRITY_FILE = DATA_DIR / "integrity.json"  # result of the last system check
 
 DEFAULTS = {
     # The desktop user who gets the popups and whose files are protected.
@@ -44,6 +46,25 @@ DEFAULTS = {
     "allowlist": ["dolphin", "plasmashell", "baloo_file", "kio_file",
                   "kioworker", "rsync", "borg", "restic", "git", "tar",
                   "ark", "kdeconnectd", "syncthing", "nextcloud"],
+
+    # Break-in guard
+    "breakin_guard": True,
+    # Block attackers in the firewall (nftables), and for how long.
+    "auto_block": True,
+    "block_hours": 24,
+    # SSH: this many failed logins within this many minutes = attack.
+    "ssh_max_failures": 5,
+    "ssh_window_minutes": 10,
+    # Port scan: this many different ports within this many seconds = scan.
+    "scan_ports": 15,
+    "scan_window_seconds": 20,
+    # Look up location, provider and owner of attackers online.
+    "ip_lookup": True,
+    # Addresses that are never blocked (e.g. your other PCs).
+    "trusted_ips": ["127.0.0.0/8", "::1/128"],
+
+    # Gentoo: check system programs against Portage's records once a day.
+    "system_check": True,
 }
 
 
@@ -88,11 +109,19 @@ def to_toml(cfg):
 
 def load():
     cfg = load_raw()
-    name = cfg["user"] or os.environ.get("SUDO_USER") or pwd.getpwuid(os.getuid()).pw_name
+    name = cfg["user"] or os.environ.get("SUDO_USER") or \
+        (guess_desktop_user() if IS_ROOT else None) or pwd.getpwuid(os.getuid()).pw_name
     user = pwd.getpwnam(name)
     cfg["user"], cfg["uid"], cfg["home"] = user.pw_name, user.pw_uid, user.pw_dir
     cfg["watch_dirs"] = [expand(d, user.pw_dir) for d in cfg["watch_dirs"]]
     return cfg
+
+
+def guess_desktop_user():
+    """The only normal user account on this PC, if there is exactly one."""
+    people = [u.pw_name for u in pwd.getpwall()
+              if 1000 <= u.pw_uid < 60000 and u.pw_dir.startswith("/home/")]
+    return people[0] if len(people) == 1 else None
 
 
 def expand(folder, home):

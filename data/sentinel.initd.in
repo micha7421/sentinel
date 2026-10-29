@@ -1,0 +1,20 @@
+#!/sbin/openrc-run
+# OpenRC service for Sentinel (for Gentoo systems without systemd)
+
+description="Sentinel security guard (ransomware and break-in protection)"
+command="@BINDIR@/sentinel"
+command_args="run"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/sentinel/openrc.log"
+error_log="/var/log/sentinel/openrc.log"
+
+depend() {
+	need localmount
+	after net
+	use logger
+}
+
+start_pre() {
+	checkpath -d -m 0755 /var/log/sentinel /var/lib/sentinel
+}

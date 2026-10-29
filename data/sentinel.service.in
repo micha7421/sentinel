@@ -1,0 +1,12 @@
+[Unit]
+Description=Sentinel security guard (ransomware and break-in protection)
+After=local-fs.target network.target
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/sentinel run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

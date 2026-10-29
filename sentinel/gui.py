@@ -5,6 +5,7 @@ asks for your password (through KDE's normal password dialog) only when it
 has to change something: settings, quarantine, starting the service.
 """
 
+import ipaddress
 import json
 import os
 import shutil
@@ -16,16 +17,21 @@ import time
 from PyQt6.QtCore import QPointF, QProcess, QSettings, QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPainterPath, QPixmap, QPolygonF
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox,
+    QAbstractItemView, QApplication, QCheckBox, QScrollArea, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
     QInputDialog, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QStackedWidget,
     QSystemTrayIcon, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import config, quarantine
+from . import breakin, config, portage_db, quarantine
 
+STATUS_TEXT = {"blocked": "Blocked in the firewall.", "expired": "The block has expired.",
+               "unblocked": "Unblocked.", "not blocked": "Not blocked."}
 GREEN, ORANGE, RED = QColor("#27ae60"), QColor("#f39c12"), QColor("#da4453")
-SENTINEL_CMD = "/usr/local/bin/sentinel"
+# pkexec needs the full path. /usr/bin = installed with emerge,
+# /usr/local/bin = installed with install.sh
+SENTINEL_CMD = next((p for p in ("/usr/bin/sentinel", "/usr/local/bin/sentinel")
+                     if os.path.exists(p)), "/usr/local/bin/sentinel")
 
 
 # ---------- small helpers ----------
@@ -105,6 +111,21 @@ def heading(text):
     return label
 
 
+def spin(low, high):
+    box = QSpinBox()
+    box.setRange(low, high)
+    return box
+
+
+def hrow(*parts):
+    """A row of labels and input boxes: hrow("Alarm when", box, "files")"""
+    row = QHBoxLayout()
+    for part in parts:
+        row.addWidget(QLabel(part) if isinstance(part, str) else part)
+    row.addStretch()
+    return row
+
+
 def hint(text):
     label = QLabel(text)
     label.setWordWrap(True)
@@ -174,8 +195,9 @@ class OverviewPage(QWidget):
         grid.setSpacing(12)
         self.stats = {}
         for i, (key, label) in enumerate([
-                ("folders", "Protected folders"), ("alarms", "Alarms (30 days)"),
-                ("quarantine", "In quarantine"), ("last", "Last alarm")]):
+                ("folders", "Protected folders"), ("alarms", "Ransomware alarms"),
+                ("attacks", "Break-in attempts"), ("quarantine", "In quarantine"),
+                ("last", "Last alarm")]):
             box = QFrame()
             box.setObjectName("stat")
             v = QVBoxLayout(box)
@@ -197,16 +219,36 @@ class OverviewPage(QWidget):
         QVBoxLayout(group).addWidget(self.features)
         layout.addWidget(group)
 
+        # Gentoo: compare system programs with Portage's records
+        self.syscheck = QGroupBox("Gentoo system check")
+        row = QHBoxLayout(self.syscheck)
+        self.syscheck_text = QLabel()
+        self.syscheck_text.setWordWrap(True)
+        self.syscheck_text.setTextFormat(Qt.TextFormat.RichText)
+        row.addWidget(self.syscheck_text, 1)
+        self.syscheck_btn = QPushButton(theme_icon("system-search"), "Check now")
+        self.syscheck_btn.setToolTip("Compares your system programs with what Portage "
+                                     "installed, to find secretly changed ones.")
+        self.syscheck_btn.clicked.connect(self.check_system)
+        row.addWidget(self.syscheck_btn, 0, Qt.AlignmentFlag.AlignTop)
+        self.syscheck.setVisible(portage_db.available())
+        layout.addWidget(self.syscheck)
+
         # Tests
         tests = QGroupBox("Try it out (safe)")
         row = QHBoxLayout(tests)
         test_btn = QPushButton(theme_icon("tools-check-spelling"), "Run ransomware test")
         test_btn.setToolTip("Releases harmless fake ransomware in a throwaway "
                             "folder and checks that Sentinel stops it.")
-        test_btn.clicked.connect(win.run_ransomware_test)
+        test_btn.clicked.connect(lambda: TestDialog(win, "test-ransomware").show())
+        breakin_btn = QPushButton(theme_icon("network-firewall"), "Run break-in test")
+        breakin_btn.setToolTip("Checks the VPN/Tor lists, simulates an SSH attack from "
+                               "a test address and scans this PC.")
+        breakin_btn.clicked.connect(lambda: TestDialog(win, "test-breakin").show())
         popup_btn = QPushButton(theme_icon("preferences-desktop-notification"), "Show test popup")
         popup_btn.clicked.connect(lambda: RootTask(self, ["test-popup"], lambda *a: None))
         row.addWidget(test_btn)
+        row.addWidget(breakin_btn)
         row.addWidget(popup_btn)
         row.addStretch()
         layout.addWidget(tests)
@@ -238,7 +280,8 @@ class OverviewPage(QWidget):
             self.action.setVisible(True)
         else:
             color, title = GREEN, "You are protected"
-            sub = f"Sentinel is watching {len(folders)} folders for ransomware."
+            sub = f"Sentinel is watching {len(folders)} folders for ransomware"
+            sub += " and your network for break-ins." if cfg["breakin_guard"] else "."
             self.action.setVisible(False)
 
         self.shield.setPixmap(shield_icon(color, 72).pixmap(72, 72))
@@ -254,8 +297,13 @@ class OverviewPage(QWidget):
         recent = [e for e in real if e["time"] > time.time() - 30 * 86400]
         self.stats["folders"].setText(str(len(folders)))
         self.stats["alarms"].setText(str(len(recent)))
+        attacks = [a for a in self.win.attacks if not a.get("test")
+                   and a["time"] > time.time() - 30 * 86400]
+        self.stats["attacks"].setText(str(len(attacks)))
         self.stats["quarantine"].setText(str(len(quarantine.list_items())))
-        self.stats["last"].setText(time_ago(real[-1]["time"]) if real else "never")
+        times = [e["time"] for e in real] + [a["time"] for a in self.win.attacks
+                                             if not a.get("test")]
+        self.stats["last"].setText(time_ago(max(times)) if times else "never")
 
         def onoff(v):
             return "<b style='color:#27ae60'>On</b>" if v else "<b style='color:#da4453'>Off</b>"
@@ -264,13 +312,51 @@ class OverviewPage(QWidget):
             f"Stop ransomware automatically: {onoff(cfg['auto_kill'])} &nbsp;&nbsp; "
             f"Quarantine: {onoff(cfg['auto_quarantine'])}<br>"
             f"Alarm when {cfg['burst_files']} files change within "
-            f"{cfg['window_seconds']} seconds and look encrypted.")
+            f"{cfg['window_seconds']} seconds and look encrypted.<br>"
+            f"Break-in guard: {onoff(cfg['breakin_guard'])} &nbsp;&nbsp; "
+            f"Block attackers: {onoff(cfg['auto_block'])} &nbsp;&nbsp; "
+            f"VPN/Tor check: <b style='color:#27ae60'>On</b>")
+        self.refresh_syscheck()
+
+    def refresh_syscheck(self):
+        if not portage_db.available():
+            return
+        try:
+            r = json.loads(config.INTEGRITY_FILE.read_text())
+        except (OSError, ValueError):
+            self.syscheck_text.setText("Not checked yet. Sentinel checks once a day, "
+                                       "or click <b>Check now</b>.")
+            return
+        bad = r["changed"] + r["missing"]
+        when = time_ago(r["time"])
+        if not bad:
+            self.syscheck_text.setText(
+                f"✅ Last check {when}: all {r['checked']} system programs match "
+                "what Portage installed.")
+        else:
+            pkgs = sorted({b["package"] for b in bad})
+            files = "<br>".join(f"&nbsp;&nbsp;{b['path']} ({b['package']})" for b in bad[:6])
+            self.syscheck_text.setText(
+                f"<b style='color:#da4453'>⚠️ Last check {when}: {len(r['changed'])} changed, "
+                f"{len(r['missing'])} missing</b><br>{files}<br>"
+                f"Reinstall them with: <code>emerge -1 {' '.join('=' + p for p in pkgs[:6])}</code>")
+
+    def check_system(self):
+        self.syscheck_btn.setEnabled(False)
+        self.syscheck_text.setText("Checking… (this can take a minute)")
+
+        def done(ok, output, cancelled):
+            self.syscheck_btn.setEnabled(True)
+            if not ok and not cancelled:
+                QMessageBox.warning(self, "Sentinel", output)
+            self.refresh_syscheck()
+        self.win.tasks.append(RootTask(self, ["check-system"], done))
 
     def on_action(self):
         if self.win.state != "active":
             self.win.start_service()
         elif self.action.text() == "Open settings":
-            self.win.nav.setCurrentRow(3)
+            self.win.go("Settings")
         else:
             self.win.mark_seen()
 
@@ -379,16 +465,149 @@ class ActivityPage(QWidget):
             self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
 
-class SettingsPage(QWidget):
+class BreakinsPage(QWidget):
+    KIND_NAMES = {"tor": "🧅 Tor", "vpn": "🕶️ VPN", "hosting": "🖥️ Rented server",
+                  "home": "🏠 Home internet", "local": "🏡 Your network",
+                  "test": "🧪 Test", "unknown": "❔ Unknown"}
+
     def __init__(self, win):
         super().__init__()
         self.win = win
         layout = QVBoxLayout(self)
-        layout.addWidget(heading("Settings"))
+        layout.addWidget(heading("Break-in attempts"))
+        layout.addWidget(hint(
+            "Password guessing over SSH and port scans (someone looking for a way in). "
+            "Attackers are blocked in the firewall. Behind a home router, attacks from "
+            "the internet usually can't reach you, so most entries will come from your "
+            "own network or from tests."))
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(
+            ["When", "IP address", "Attack", "Where from", "Network", "Status"])
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.doubleClicked.connect(self.details)
+        self.empty = QLabel("No break-in attempts. 🎉")
+        self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.table)
+        layout.addWidget(self.empty)
+        row = QHBoxLayout()
+        self.show_tests = QCheckBox("Show tests")
+        self.show_tests.toggled.connect(self.refresh)
+        row.addWidget(self.show_tests)
+        row.addStretch()
+        self.details_btn = QPushButton(theme_icon("documentinfo"), "Details && report…")
+        self.details_btn.clicked.connect(self.details)
+        self.unblock_btn = QPushButton(theme_icon("dialog-ok-apply"), "Unblock")
+        self.unblock_btn.clicked.connect(self.unblock)
+        row.addWidget(self.details_btn)
+        row.addWidget(self.unblock_btn)
+        layout.addLayout(row)
+        self.rows = []
+
+    def refresh(self):
+        attacks = self.win.attacks
+        if not self.show_tests.isChecked():
+            attacks = [a for a in attacks if not a.get("test")]
+        self.rows = list(reversed(attacks))
+        self.table.setRowCount(len(self.rows))
+        for r, a in enumerate(self.rows):
+            info = a["info"]
+            where = ", ".join(p for p in (info.get("location"), info.get("isp")) if p) or "–"
+            status = {"blocked": f"🚫 blocked until "
+                                 f"{time.strftime('%H:%M %d %b', time.localtime(a['blocked_until']))}",
+                      "expired": "block expired", "unblocked": "unblocked",
+                      "not blocked": "not blocked"}[a["status"]]
+            cells = [time.strftime("%d %b %H:%M", time.localtime(a["time"])), a["ip"],
+                     a["attack"], where, self.KIND_NAMES.get(info["kind"], info["kind"]), status]
+            for c, text in enumerate(cells):
+                cell = QTableWidgetItem(text)
+                cell.setToolTip(info["label"] if c == 4 else text)
+                self.table.setItem(r, c, cell)
+        self.table.resizeColumnsToContents()
+        has = bool(self.rows)
+        self.table.setVisible(has)
+        self.empty.setVisible(not has)
+        self.details_btn.setEnabled(has)
+        self.unblock_btn.setEnabled(has)
+
+    def selected(self):
+        row = self.table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Sentinel", "Select an attack first.")
+            return None
+        return self.rows[row]
+
+    def details(self):
+        a = self.selected()
+        if not a:
+            return
+        info = a["info"]
+        when = time.strftime("%d %b %Y %H:%M:%S %Z", time.localtime(a["time"]))
+        report = (f"Hello,\n\nthe IP address {a['ip']} from your network attacked my "
+                  f"computer.\n\nAttack: {a['attack']} ({a['detail']})\nTime: {when}\n\n"
+                  "Please look into it.\n")
+        text = (f"<h3>{a['attack']} from {a['ip']}</h3>"
+                f"<p>{a['detail']}<br>{when}</p>"
+                f"<p><b>{info['label']}</b></p><table>"
+                + "".join(f"<tr><td><b>{k}</b>&nbsp;&nbsp;</td><td>{v}</td></tr>" for k, v in [
+                    ("Location", info.get("location") or "–"),
+                    ("Provider", info.get("isp") or "–"),
+                    ("Network", info.get("network") or "–"),
+                    ("Report to", info.get("abuse_email") or "–")])
+                + "</table>")
+        if info.get("abuse_email"):
+            text += ("<p>You can report the attack to the provider's abuse address. "
+                     "<b>Copy report</b> puts a ready-made e-mail on your clipboard.</p>")
+        text += ("<p><i>Location and network type are a good guess, not proof. "
+                 "Never attack back: that is illegal, and the IP often belongs to an "
+                 "innocent, hacked computer.</i></p>")
+        box = QMessageBox(self)
+        box.setWindowTitle("Attack details")
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(text)
+        copy = None
+        if info.get("abuse_email"):
+            copy = box.addButton("Copy report", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+        if copy is not None and box.clickedButton() == copy:
+            QApplication.clipboard().setText(f"To: {info['abuse_email']}\n\n{report}")
+            self.win.statusBar().showMessage("Report copied to the clipboard.", 6000)
+
+    def unblock(self):
+        a = self.selected()
+        if not a:
+            return
+        if a["status"] != "blocked":
+            QMessageBox.information(self, "Sentinel", f"{a['ip']} is not blocked.")
+            return
+        if QMessageBox.question(self, "Sentinel", f"Unblock {a['ip']}?") == \
+                QMessageBox.StandardButton.Yes:
+            self.win.run_root(["unblock", a["ip"]], f"{a['ip']} unblocked.")
+
+
+class SettingsPage(QWidget):
+    def __init__(self, win):
+        super().__init__()
+        self.win = win
+        outer = QVBoxLayout(self)
+        outer.addWidget(heading("Settings"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 8, 0)
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
 
         group = QGroupBox("Protected folders")
         v = QVBoxLayout(group)
         self.folders = QListWidget()
+        self.folders.setMinimumHeight(110)
         v.addWidget(self.folders)
         v.addLayout(self.list_buttons(self.folders, self.add_folder))
         layout.addWidget(group, 1)
@@ -400,25 +619,53 @@ class SettingsPage(QWidget):
         self.auto_quarantine = QCheckBox("Move caught programs to quarantine")
         for box in (self.canaries, self.auto_kill, self.auto_quarantine):
             v.addWidget(box)
-        row = QHBoxLayout()
-        self.burst = QSpinBox()
-        self.burst.setRange(5, 1000)
-        self.window = QSpinBox()
-        self.window.setRange(1, 120)
-        for w in (QLabel("Alarm when"), self.burst, QLabel("files change within"),
-                  self.window, QLabel("seconds")):
-            row.addWidget(w)
-        row.addStretch()
-        v.addLayout(row)
+        self.burst = spin(5, 1000)
+        self.window_secs = spin(1, 120)
+        v.addLayout(hrow("Alarm when", self.burst, "files change within",
+                         self.window_secs, "seconds"))
         v.addWidget(hint("Lower numbers react faster but can cause false alarms."))
         layout.addWidget(group)
 
         group = QGroupBox("Trusted programs (never stopped)")
         v = QVBoxLayout(group)
         self.allow = QListWidget()
+        self.allow.setMinimumHeight(110)
         v.addWidget(self.allow)
         v.addLayout(self.list_buttons(self.allow, self.add_program))
         layout.addWidget(group, 1)
+
+        group = QGroupBox("Break-in guard")
+        v = QVBoxLayout(group)
+        self.breakin_on = QCheckBox("Watch for SSH password guessing and port scans")
+        self.auto_block = QCheckBox("Block attackers in the firewall (nftables)")
+        self.ip_lookup = QCheckBox("Look up where attackers come from "
+                                   "(asks ipinfo.io and rdap.org about the attacker's IP)")
+        for box in (self.breakin_on, self.auto_block, self.ip_lookup):
+            v.addWidget(box)
+        self.block_hours = spin(1, 720)
+        self.ssh_failures = spin(2, 100)
+        self.ssh_minutes = spin(1, 1440)
+        self.scan_ports = spin(5, 1000)
+        self.scan_seconds = spin(1, 600)
+        v.addLayout(hrow("Block attackers for", self.block_hours, "hours"))
+        v.addLayout(hrow("SSH attack:", self.ssh_failures, "failed logins within",
+                         self.ssh_minutes, "minutes"))
+        v.addLayout(hrow("Port scan:", self.scan_ports, "different ports within",
+                         self.scan_seconds, "seconds"))
+        v.addWidget(QLabel("Trusted addresses, never blocked (e.g. 192.168.1.10 or 192.168.1.0/24):"))
+        self.trusted = QListWidget()
+        self.trusted.setMinimumHeight(80)
+        self.trusted.setMaximumHeight(120)
+        v.addWidget(self.trusted)
+        v.addLayout(self.list_buttons(self.trusted, self.add_trusted))
+        layout.addWidget(group)
+
+        group = QGroupBox("Gentoo")
+        v = QVBoxLayout(group)
+        self.system_check = QCheckBox("Check system programs against Portage's records once a day")
+        v.addWidget(self.system_check)
+        group.setVisible(portage_db.available())
+        layout.addWidget(group)
 
         row = QHBoxLayout()
         row.addStretch()
@@ -429,7 +676,7 @@ class SettingsPage(QWidget):
         save.clicked.connect(self.save)
         row.addWidget(undo)
         row.addWidget(save)
-        layout.addLayout(row)
+        outer.addLayout(row)
         self.loaded = False
 
     def list_buttons(self, lst, add):
@@ -457,6 +704,18 @@ class SettingsPage(QWidget):
         if ok and name.strip():
             self.allow.addItem(name.strip())
 
+    def add_trusted(self):
+        text, ok = QInputDialog.getText(self, "Trust an address",
+                                        "IP address or network (e.g. 192.168.1.0/24):")
+        if not ok or not text.strip():
+            return
+        try:
+            ipaddress.ip_network(text.strip(), strict=False)
+        except ValueError:
+            QMessageBox.warning(self, "Sentinel", f"'{text}' is not an IP address.")
+            return
+        self.trusted.addItem(text.strip())
+
     def refresh(self):
         if not self.loaded:  # don't overwrite changes the user is making
             self.load()
@@ -471,7 +730,18 @@ class SettingsPage(QWidget):
         self.auto_kill.setChecked(cfg["auto_kill"])
         self.auto_quarantine.setChecked(cfg["auto_quarantine"])
         self.burst.setValue(cfg["burst_files"])
-        self.window.setValue(cfg["window_seconds"])
+        self.window_secs.setValue(cfg["window_seconds"])
+        self.breakin_on.setChecked(cfg["breakin_guard"])
+        self.auto_block.setChecked(cfg["auto_block"])
+        self.ip_lookup.setChecked(cfg["ip_lookup"])
+        self.block_hours.setValue(cfg["block_hours"])
+        self.ssh_failures.setValue(cfg["ssh_max_failures"])
+        self.ssh_minutes.setValue(cfg["ssh_window_minutes"])
+        self.scan_ports.setValue(cfg["scan_ports"])
+        self.scan_seconds.setValue(cfg["scan_window_seconds"])
+        self.trusted.clear()
+        self.trusted.addItems(cfg["trusted_ips"])
+        self.system_check.setChecked(cfg["system_check"])
         self.loaded = True
 
     def save(self):
@@ -483,7 +753,17 @@ class SettingsPage(QWidget):
             "auto_kill": self.auto_kill.isChecked(),
             "auto_quarantine": self.auto_quarantine.isChecked(),
             "burst_files": self.burst.value(),
-            "window_seconds": self.window.value(),
+            "window_seconds": self.window_secs.value(),
+            "breakin_guard": self.breakin_on.isChecked(),
+            "auto_block": self.auto_block.isChecked(),
+            "ip_lookup": self.ip_lookup.isChecked(),
+            "block_hours": self.block_hours.value(),
+            "ssh_max_failures": self.ssh_failures.value(),
+            "ssh_window_minutes": self.ssh_minutes.value(),
+            "scan_ports": self.scan_ports.value(),
+            "scan_window_seconds": self.scan_seconds.value(),
+            "trusted_ips": [self.trusted.item(i).text() for i in range(self.trusted.count())],
+            "system_check": self.system_check.isChecked(),
         })
         fd, path = tempfile.mkstemp(prefix="sentinel-", suffix=".toml")
         with os.fdopen(fd, "w") as f:
@@ -499,9 +779,10 @@ class SettingsPage(QWidget):
 # ---------- test dialog ----------
 
 class TestDialog(QDialog):
-    def __init__(self, parent):
+    def __init__(self, parent, command):
         super().__init__(parent)
-        self.setWindowTitle("Ransomware test")
+        self.setWindowTitle({"test-ransomware": "Ransomware test",
+                             "test-breakin": "Break-in test"}[command])
         self.resize(640, 360)
         layout = QVBoxLayout(self)
         self.status = QLabel("Running the test… (enter your password if asked)")
@@ -513,13 +794,13 @@ class TestDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.close)
         layout.addWidget(buttons)
-        self.task = RootTask(self, ["test-ransomware"], self.done, self.out.insertPlainText)
+        self.task = RootTask(self, [command], self.done, self.out.insertPlainText)
 
     def done(self, ok, output, cancelled):
         if cancelled:
             self.status.setText("Cancelled.")
         elif ok:
-            self.status.setText("✅ Test passed: Sentinel stopped the fake ransomware.")
+            self.status.setText("✅ Test passed.")
         else:
             self.status.setText("❌ Test failed, see the output below.")
         self.parent().refresh()
@@ -529,7 +810,8 @@ class TestDialog(QDialog):
 
 class MainWindow(QMainWindow):
     PAGES = [("Overview", "security-high"), ("Quarantine", "folder-locked"),
-             ("Activity", "view-history"), ("Settings", "configure")]
+             ("Break-ins", "network-firewall"), ("Activity", "view-history"),
+             ("Settings", "configure")]
 
     def __init__(self):
         super().__init__()
@@ -538,9 +820,11 @@ class MainWindow(QMainWindow):
         self.resize(900, 620)
         self.settings = QSettings("Sentinel", "Sentinel")
         self.state, self.events, self.cfg = "unknown", [], config.load_raw()
+        self.attacks = []
         self.tasks = []
         self.tray = None
         self.known_alarms = len(read_events())
+        self.known_attacks = len(breakin.read_attacks())
 
         central = QWidget()
         h = QHBoxLayout(central)
@@ -551,8 +835,8 @@ class MainWindow(QMainWindow):
         self.nav.setFixedWidth(190)
         self.nav.setIconSize(QSize(22, 22))
         self.stack = QStackedWidget()
-        self.pages = [OverviewPage(self), QuarantinePage(self), ActivityPage(self),
-                      SettingsPage(self)]
+        self.pages = [OverviewPage(self), QuarantinePage(self), BreakinsPage(self),
+                      ActivityPage(self), SettingsPage(self)]
         for (name, icon), page in zip(self.PAGES, self.pages):
             self.nav.addItem(QListWidgetItem(theme_icon(icon), name))
             wrapper = QWidget()
@@ -610,18 +894,38 @@ class MainWindow(QMainWindow):
     # --- state ---
 
     def unseen_alarms(self):
+        """New ransomware alarms and break-in attempts, oldest first."""
         seen = float(self.settings.value("seen_until", 0))
-        return [e for e in self.events if not e.get("test") and e["time"] > seen]
+        new = [e for e in self.events if not e.get("test") and e["time"] > seen]
+        for a in self.attacks:
+            if not a.get("test") and a["time"] > seen:
+                new.append({"time": a["time"], "reason": f"{a['attack']} from {a['ip']}",
+                            "actions": [a["detail"], a["info"]["label"],
+                                        STATUS_TEXT[a["status"]]]})
+        return sorted(new, key=lambda e: e["time"])
 
     def mark_seen(self):
-        if self.events:
-            self.settings.setValue("seen_until", self.events[-1]["time"])
+        latest = [e["time"] for e in self.events] + [a["time"] for a in self.attacks]
+        if latest:
+            self.settings.setValue("seen_until", max(latest))
         self.refresh()
+
+    def go(self, page_name):
+        self.nav.setCurrentRow([name for name, _ in self.PAGES].index(page_name))
 
     def refresh(self):
         self.state = service_state()
         self.events = read_events()
+        self.attacks = breakin.read_attacks()
         self.cfg = config.load_raw()
+
+        new_attacks = [a for a in self.attacks[self.known_attacks:] if not a.get("test")]
+        self.known_attacks = len(self.attacks)
+        if new_attacks and self.tray:
+            a = new_attacks[-1]
+            self.tray.showMessage("Sentinel: break-in attempt",
+                                  f"{a['attack']} from {a['ip']}\n{a['info']['label']}",
+                                  shield_icon(RED), 15000)
 
         # Tell the user about brand-new alarms even when the window is hidden.
         new = [e for e in self.events[self.known_alarms:] if not e.get("test")]
@@ -664,9 +968,6 @@ class MainWindow(QMainWindow):
             proc.finished.connect(lambda *a: self.refresh())
             proc.start("pkexec", ["systemctl", "enable", "--now", "sentinel"])
             self.tasks.append(proc)
-
-    def run_ransomware_test(self):
-        TestDialog(self).show()
 
     # --- window / tray ---
 
