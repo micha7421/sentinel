@@ -15,6 +15,7 @@
   python -m sentinel security            show security tools and hardening score
   python -m sentinel setup               first-run setup (config + enable service)
   python -m sentinel test-threats        safe test of credential/persistence/crash guards
+  python -m sentinel pentest             try to evade the guards, report coverage gaps
   python -m sentinel gui                 open the Sentinel window
 """
 
@@ -456,6 +457,12 @@ def cmd_test_threats(args):
     sys.exit(0 if all(ok for _, ok in results) else 1)
 
 
+def cmd_pentest(args):
+    """Red-team the guards: run evasion scenarios and report coverage gaps."""
+    from . import pentest
+    pentest.main()
+
+
 def cmd_security(args):
     mark = {True: "🟢", False: "🔴", None: "⚪"}
     cfg = config.load_raw()
@@ -547,6 +554,7 @@ def main():
     sub.add_parser("security", help="show security tools and hardening score").set_defaults(func=cmd_security)
     sub.add_parser("setup", help="first-run setup (writes config, enables service)").set_defaults(func=cmd_setup)
     sub.add_parser("test-threats", help="safe test of the credential/persistence/crash guards").set_defaults(func=cmd_test_threats)
+    sub.add_parser("pentest", help="try to evade the guards and report coverage gaps").set_defaults(func=cmd_pentest)
     sp = sub.add_parser("scan-package", help="scan package files for supply-chain risks")
     sp.add_argument("files", nargs="*", help="package files (.pkg.tar.*); none = read names from stdin")
     sp.set_defaults(func=cmd_scan_package)

@@ -249,11 +249,17 @@ class OverviewPage(QWidget):
         threats_btn.setToolTip("Safely checks the credential, persistence and crash "
                                "guards in a throwaway folder (nothing real is touched).")
         threats_btn.clicked.connect(lambda: TestDialog(win, "test-threats").show())
+        pentest_btn = QPushButton(theme_icon("security-medium"), "Run pentest")
+        pentest_btn.setToolTip("Red-teams the guards: tries to slip past each one "
+                               "and reports where the coverage gaps are. Harmless "
+                               "and sandboxed.")
+        pentest_btn.clicked.connect(lambda: TestDialog(win, "pentest").show())
         popup_btn = QPushButton(theme_icon("preferences-desktop-notification"), "Show test popup")
         popup_btn.clicked.connect(lambda: RootTask(self, ["test-popup"], lambda *a: None))
         row.addWidget(test_btn)
         row.addWidget(breakin_btn)
         row.addWidget(threats_btn)
+        row.addWidget(pentest_btn)
         row.addWidget(popup_btn)
         row.addStretch()
         layout.addWidget(tests)
@@ -925,10 +931,12 @@ class SettingsPage(QWidget):
 class TestDialog(QDialog):
     def __init__(self, parent, command):
         super().__init__(parent)
+        self.command = command
         self.setWindowTitle({"test-ransomware": "Ransomware test",
                              "test-threats": "Threat test (credentials, autostart, crash)",
-                             "test-breakin": "Break-in test"}[command])
-        self.resize(640, 360)
+                             "test-breakin": "Break-in test",
+                             "pentest": "Pentest — coverage gaps"}[command])
+        self.resize(720, 460)
         layout = QVBoxLayout(self)
         self.status = QLabel("Running the test… (enter your password if asked)")
         layout.addWidget(self.status)
@@ -944,6 +952,12 @@ class TestDialog(QDialog):
     def done(self, ok, output, cancelled):
         if cancelled:
             self.status.setText("Cancelled.")
+        elif self.command == "pentest":
+            # The pentest exits 0 unless a guard regressed; gaps are expected
+            # and listed in the output, so don't frame them as a failure.
+            self.status.setText("✅ Finished — no regressions. See the gaps below."
+                                if ok else
+                                "❌ A guard that should have fired did not — see below.")
         elif ok:
             self.status.setText("✅ Test passed.")
         else:
