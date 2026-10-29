@@ -15,7 +15,7 @@ A background security guard for Linux (made on Gentoo + KDE + systemd).
 ## Install (Gentoo)
 
 ```bash
-sudo emerge --ask dev-python/watchdog dev-python/psutil x11-libs/libnotify
+sudo emerge --ask dev-python/watchdog dev-python/psutil x11-libs/libnotify dev-python/pyqt6
 git clone https://github.com/micha7421/sentinel.git
 cd sentinel
 sudo ./install.sh
